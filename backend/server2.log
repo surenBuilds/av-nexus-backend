@@ -1,0 +1,16 @@
+WARNING:  ASGI app factory detected. Using it, but please consider setting the --factory flag explicitly.
+INFO:     Started server process [5040]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51410 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51411 - "POST /api/v1/auth/register HTTP/1.1" 201 Created
+INFO:     127.0.0.1:51412 - "POST /api/v1/workflows HTTP/1.1" 201 Created
+INFO:     127.0.0.1:51413 - "POST /api/v1/workflows/409734db-838c-4bb3-87a5-b6bcbce8621c/start HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51414 - "GET /api/v1/workflows/409734db-838c-4bb3-87a5-b6bcbce8621c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51415 - "GET /api/v1/workflows/409734db-838c-4bb3-87a5-b6bcbce8621c/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51416 - "POST /api/v1/approvals/bd17801f-5c52-49dd-9590-4251f33c4aca/approve HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51417 - "GET /api/v1/workflows/409734db-838c-4bb3-87a5-b6bcbce8621c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51418 - "GET /api/v1/workflows/409734db-838c-4bb3-87a5-b6bcbce8621c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51419 - "GET /api/v1/workflows/409734db-838c-4bb3-87a5-b6bcbce8621c/result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51420 - "GET /api/v1/workflows/409734db-838c-4bb3-87a5-b6bcbce8621c/runs HTTP/1.1" 200 OK

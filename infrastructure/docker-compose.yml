@@ -1,0 +1,47 @@
+# AV Nexus — local orchestration stack.
+#
+# Default (SQLite, offline agents) — full stack up in seconds:
+#   docker compose up --build
+#
+# PostgreSQL profile — production-like storage. Set the backend DSN to Postgres:
+#   docker compose --profile postgres up --build
+#   set AVNEXUS_DB_URL=postgresql+psycopg://avnexus:avnexus@postgres:5432/avnexus
+
+services:
+  backend:
+    build:
+      context: ../backend
+    environment:
+      AVNEXUS_ENV: ${AVNEXUS_ENV:-development}
+      AVNEXUS_JWT_SECRET: ${AVNEXUS_JWT_SECRET:-dev-only-change-me}
+      AVNEXUS_SEED_DEMO: ${AVNEXUS_SEED_DEMO:-true}
+      AVNEXUS_LLM_PROVIDER: ${AVNEXUS_LLM_PROVIDER:-off}
+      # Default: persisted SQLite under the named volume.
+      # With the postgres profile, set AVNEXUS_DB_URL to the Postgres DSN above.
+      AVNEXUS_DB_URL: ${AVNEXUS_DB_URL:-sqlite:////data/avnexus.db}
+    env_file:
+      - path: ../.env
+        required: false
+    ports:
+      - "8000:8000"
+    volumes:
+      - avnexus_data:/data
+    profiles: ["", "postgres", "backend-only"]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: avnexus
+      POSTGRES_PASSWORD: avnexus
+      POSTGRES_DB: avnexus
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    profiles: ["", "postgres"]
+    restart: unless-stopped
+
+volumes:
+  avnexus_data:
+  pgdata:
