@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 import { ApiError } from "../lib/api/client";
 import { createWorkflow } from "../lib/api/workflows";
 import { listCompanies } from "../lib/api/data";
@@ -127,13 +128,16 @@ export default function NewWorkflowPage() {
           >
             Cancel
           </button>
-          <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+          <button type="submit" className="btn btn-gradient" disabled={!canSubmit}>
             {submitting ? (
               <span className="inline-flex items-center gap-2">
                 <Spinner /> Creating…
               </span>
             ) : (
-              "Create workflow"
+              <span className="inline-flex items-center gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-amber-300" aria-hidden="true" />
+                Create workflow
+              </span>
             )}
           </button>
         </div>

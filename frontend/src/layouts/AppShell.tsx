@@ -1,17 +1,27 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import {
+  LayoutGrid,
+  Network,
+  Radar,
+  Building2,
+  GitBranch,
+  ShieldCheck,
+  Gavel,
+  Activity,
+} from "lucide-react";
 import { useHealth } from "../hooks/useHealth";
 import { useAuth } from "../auth/AuthContext";
 
 const NAV_ITEMS = [
-  { to: "/command-center", label: "Command Center", section: "OPERATIONS" },
-  { to: "/agents", label: "Agent Network", section: "OPERATIONS" },
-  { to: "/opportunities", label: "Opportunities", section: "TRACKING" },
-  { to: "/companies", label: "Companies", section: "TRACKING" },
-  { to: "/workflows", label: "Workflows", section: "TRACKING" },
-  { to: "/approvals", label: "Approvals", section: "GOVERNANCE" },
-  { to: "/decisions", label: "Decisions", section: "GOVERNANCE" },
-  { to: "/activity", label: "Activity", section: "GOVERNANCE" },
+  { to: "/command-center", label: "Command Center", section: "OPERATIONS", icon: LayoutGrid },
+  { to: "/agents", label: "Agent Network", section: "OPERATIONS", icon: Network },
+  { to: "/opportunities", label: "Opportunities", section: "TRACKING", icon: Radar },
+  { to: "/companies", label: "Companies", section: "TRACKING", icon: Building2 },
+  { to: "/workflows", label: "Workflows", section: "TRACKING", icon: GitBranch },
+  { to: "/approvals", label: "Approvals", section: "GOVERNANCE", icon: ShieldCheck },
+  { to: "/decisions", label: "Decisions", section: "GOVERNANCE", icon: Gavel },
+  { to: "/activity", label: "Activity", section: "GOVERNANCE", icon: Activity },
 ] as const;
 
 function Section({ name }: { name: string }) {
@@ -34,6 +44,7 @@ function SidebarContent({ collapsed }: { collapsed: boolean }) {
           lastSection = item.section;
           if (!collapsed) acc.push(<Section key={item.section} name={item.section} />);
         }
+        const Icon = item.icon;
         acc.push(
           <NavLink
             key={item.to}
@@ -47,7 +58,7 @@ function SidebarContent({ collapsed }: { collapsed: boolean }) {
               }`
             }
           >
-            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+            <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
             {!collapsed && <span className="truncate">{item.label}</span>}
           </NavLink>,
         );
@@ -96,8 +107,9 @@ export default function AppShell() {
                 <p className="text-sm font-bold tracking-widest text-accent">AV NEXUS</p>
               </div>
               <div className="hidden md:block">
-                <p className="text-sm font-semibold text-slate-200">
+                <p className="flex items-center gap-2 text-sm font-semibold text-slate-200">
                   {health.data ? health.data.app : "Command Center"}
+                  <span className="badge-mono">AV-OS</span>
                 </p>
                 <p className="text-xs text-slate-500">
                   {me?.organization?.name ?? "—"} · {me?.user.role}

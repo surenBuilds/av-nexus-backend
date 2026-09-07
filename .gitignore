@@ -12,3 +12,4 @@ dist/
 
 # Frontend TypeScript build artifacts
 frontend/.ts-tmp/
+*.tsbuildinfo
