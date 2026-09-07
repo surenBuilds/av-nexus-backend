@@ -9,3 +9,6 @@ __pycache__/
 node_modules/
 dist/
 .uv/
+
+# Frontend TypeScript build artifacts
+frontend/.ts-tmp/
