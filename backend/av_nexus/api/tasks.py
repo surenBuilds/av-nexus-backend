@@ -51,6 +51,7 @@ def create_task(
             priority=payload.priority,
             approval_level=payload.approval_level,
             depends_on=payload.depends_on,
+            input_json=payload.input_json,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc

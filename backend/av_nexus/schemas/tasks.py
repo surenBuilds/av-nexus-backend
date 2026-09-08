@@ -21,6 +21,7 @@ class TaskCreate(BaseModel):
     deadline: datetime | None = None
     approval_level: int = Field(default=1, ge=1, le=4)
     depends_on: list[uuid.UUID] = Field(default_factory=list)
+    input_json: dict[str, Any] | None = None
 
 
 class TaskOut(ORMModel):
@@ -37,6 +38,7 @@ class TaskOut(ORMModel):
     approval_level: int
     error: str | None
     output_json: dict[str, Any] | None
+    input_json: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
 
