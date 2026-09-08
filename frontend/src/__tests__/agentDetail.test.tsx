@@ -70,6 +70,7 @@ const task: Task = {
   approval_level: 1,
   error: null,
   output_json: null,
+  input_json: null,
   created_at: "2026-09-05T08:00:00Z",
   updated_at: "2026-09-05T09:00:00Z",
 };

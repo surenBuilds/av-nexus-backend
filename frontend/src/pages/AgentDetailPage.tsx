@@ -8,6 +8,7 @@ import {
 } from "../components/ui";
 import { getAgent, listAgentRuns, listAgentMessages, listTasks } from "../lib/api/agents";
 import { useFetch } from "../lib/hooks/useFetch";
+import { RunAgentPanel } from "../features/agent-run/RunAgentPanel";
 import {
   formatDateTime,
   formatNumber,
@@ -96,6 +97,16 @@ export default function AgentDetailPage() {
         <KeywordList title="Tools" items={agent.tools_json} />
         <KeywordList title="Permissions" items={agent.permissions_json} />
       </section>
+
+      <RunAgentPanel
+        agentId={agent.id}
+        agentName={agent.name}
+        onRan={() => {
+          void runsState.refetch();
+          void messagesState.refetch();
+          void tasksState.refetch();
+        }}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="panel">

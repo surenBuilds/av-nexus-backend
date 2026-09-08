@@ -18,9 +18,39 @@ scratch or re-audit things already covered below.
 ## Last verified state (this commit)
 
 - Backend: **91/91 pytest passing**, ruff clean, mypy --strict clean (64 files)
-- Frontend: **30/30 vitest passing**, eslint clean (5 pre-existing non-blocking
-  fast-refresh warnings only), production build green
+- Frontend: **35/35 vitest passing** (30 baseline + 5 new for RunAgentPanel),
+  eslint clean (5 pre-existing non-blocking fast-refresh warnings only),
+  production build green
 - All verification above was run directly, not copied from a report.
+
+## Latest session (frontend UI for the 10 previously-dormant agents)
+
+Built the "run any agent ad hoc" UI (option (a) from the previous handoff):
+- `lib/types/domain.ts`: added `input_json` to `Task`, added
+  `TaskCreatePayload`/`TaskRunResponse` types.
+- `lib/api/tasks.ts` (new): `createTask`, `getTask`, `runTask`,
+  `runAgentNow` — thin wrappers over the existing `/tasks` API, no new
+  backend behavior.
+- `features/agent-run/RunAgentPanel.tsx` (new): goal input + JSON textarea
+  for real `input_json`, "Run now" button, inline result display. Client-
+  side JSON validation with a clear error, not a silent failure. Routes by
+  `owner_agent_id` (the agent's own DB uuid, already available on the
+  agent-detail page) rather than by capability string, since it's more
+  precise and avoids relying on capability-string uniqueness.
+- Wired into `AgentDetailPage.tsx` — every one of the 18 agents (not just
+  the original 8 in the fixed venture-evaluation pipeline) now has a real,
+  working "Run this agent now" panel reachable from the UI, with results
+  and a refreshed run/task history immediately visible on the same page.
+- 5 new tests (`__tests__/runAgentPanel.test.tsx`): renders correctly,
+  submits real JSON and calls createTask/runTask with the right payload,
+  rejects invalid JSON without calling the API, requires a goal, surfaces
+  API errors.
+- Two existing test fixtures (`agentDetail.test.tsx`, `approvals.test.tsx`)
+  updated for the new required `input_json` field on `Task`.
+
+This closes the loop from the previous session: the 10 agents were made
+callable via the API, and now a human can actually use them from the app
+without hand-crafting HTTP requests.
 
 ## What just happened in this session
 
@@ -86,14 +116,27 @@ scratch or re-audit things already covered below.
 
 ## Recommended next step
 
-Pick ONE:
-(a) Build the generic "run an agent with custom inputs" frontend screen,
-    so the now-functional 10 agents are actually usable by a human without
-    curling the API by hand.
-(b) Go back to deploying Voxline Sales OS on Railway so these agents have
-    a real data feed instead of hand-typed input_json.
-(c) Start the coding agent (higher risk — needs its own write/commit
-    approval-gating design before any code).
+(a) is done. Remaining, in priority order for Suren's 1-2 week "fully
+working" target:
+
+1. **Voxline Sales OS → Railway deploy** (option (b) from before). Blocked
+   on Suren providing: Railway account access, and real env var values
+   (GEMINI_API_KEY, RESEND_API_KEY/FROM_EMAIL, GMAIL_USER/APP_PASSWORD,
+   VOXLINE_CONTACT_*). The known auth gap (no route-level auth on that
+   repo's API) must be fixed or the service must stay off a public domain
+   — do not deploy it publicly as-is. Without this, CEO/CFO/CMO/COO/Sales
+   agents are honest but limited to hand-typed input_json — real value
+   requires a real data feed.
+2. Approval-level UI: tasks created via RunAgentPanel currently default to
+   approval_level 1 (no gate) — matches the "advisory only in this phase"
+   decision made earlier in this project. If Suren wants any of these 10
+   agents to eventually trigger real external actions (e.g. Sales agent
+   actually sending outreach), that needs explicit approval-level wiring
+   in the UI too, plus a real decision on which actions are gated.
+3. The coding agent (option (c)) — still not started. Higher risk, needs
+   its own write/commit approval-gating design first. Recommend not
+   starting this inside the 1-2 week window unless (1) and (2) are done
+   with room to spare.
 
 Do not start more than one without checking in — the pattern in this
 project has consistently been: pick one narrow thing, prove it end-to-end

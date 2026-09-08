@@ -78,8 +78,39 @@ export interface Task {
   approval_level: number;
   error: string | null;
   output_json: Record<string, unknown> | null;
+  input_json: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface TaskCreatePayload {
+  title: string;
+  goal: string;
+  description?: string;
+  capability?: string;
+  owner_agent_id?: string;
+  priority?: string;
+  approval_level?: number;
+  input_json?: Record<string, unknown>;
+}
+
+export interface TaskRunResponse {
+  task: Task;
+  agent_runs: Array<{
+    agent_id: string;
+    status: string;
+    error: string | null;
+    tokens_in: number;
+    tokens_out: number;
+    cost_usd: number;
+  }>;
+  messages: Array<{
+    from: string;
+    to: string;
+    type: string;
+    payload: Record<string, unknown>;
+    sent_at: string;
+  }>;
 }
 
 export interface Opportunity {
