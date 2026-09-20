@@ -41,7 +41,7 @@ def _build_real_client() -> LLMClient:
 
         # Groq speaks the OpenAI chat-completions API; only the base URL
         # differs, so this reuses OpenAIClient rather than duplicating it.
-        # An explicitly-set AVNEXUS_LLM__BASE_URL still wins over this default.
+        # An explicitly-set AVNEXUS_LLM_BASE_URL still wins over this default.
         base_url = settings.llm_base_url
         if base_url == "https://api.openai.com/v1":
             base_url = "https://api.groq.com/openai/v1"

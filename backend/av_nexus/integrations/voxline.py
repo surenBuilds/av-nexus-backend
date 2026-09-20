@@ -12,11 +12,16 @@ exactly what was and wasn't supplied via `VoxlineSyncResult.warnings`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from av_nexus.config import settings
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from av_nexus.models.identity import Organization, User
 
 
 class VoxlineUnavailableError(RuntimeError):
@@ -194,3 +199,88 @@ def map_brief_to_agent_inputs(brief: dict[str, Any]) -> VoxlineSyncResult:
             brief.get("generated_at") if isinstance(brief.get("generated_at"), str) else None
         ),
     )
+
+
+# capability each agent_id routes through — shared by the HTTP sync endpoint
+# and the Telegram webhook so both stay in sync with one definition.
+AGENT_CAPABILITIES: dict[str, str] = {
+    "ceo": "company_strategy",
+    "finance": "financial_analysis",
+    "marketing": "marketing_strategy",
+    "operations": "operations",
+    "sales": "lead_research",
+}
+
+
+@dataclass
+class AgentRunOutcome:
+    agent_id: str
+    capability: str
+    task_id: str | None
+    status: str
+    output_json: dict[str, Any] | None
+    error: str | None
+
+
+async def run_agents_from_voxline(
+    session: Session,
+    org: Organization,
+    user: User,
+    agent_ids: list[str] | None = None,
+) -> tuple[VoxlineSyncResult, list[AgentRunOutcome]]:
+    """Fetch the real Voxline brief once and run the requested management
+    agents (default: all 5) on it. Raises VoxlineUnavailableError if Voxline
+    can't be reached — callers decide how to surface that (HTTP 502, a
+    Telegram message, etc.), this function never falls back to stale or
+    invented data.
+    """
+    from av_nexus.agents import get_registry
+    from av_nexus.llm.factory import build_llm_client
+    from av_nexus.orchestrator.service import OrchestratorService
+
+    brief = VoxlineClient().fetch_ceo_brief()
+    result = map_brief_to_agent_inputs(brief)
+    service = OrchestratorService(session, get_registry(), build_llm_client())
+
+    targets = agent_ids if agent_ids is not None else list(AGENT_CAPABILITIES)
+    outcomes: list[AgentRunOutcome] = []
+    for agent_id in targets:
+        capability = AGENT_CAPABILITIES[agent_id]
+        input_json = result.agent_inputs.get(agent_id, {})
+        try:
+            task = service.create_task(
+                org,
+                user,
+                title=f"Voxline sync — {agent_id}",
+                goal=f"Analyze current Voxline data for the {agent_id} function",
+                capability=capability,
+                approval_level=1,
+                input_json=input_json,
+            )
+            session.commit()
+            session.refresh(task)
+            await service.run_task(task, org, user)
+            session.refresh(task)
+            outcomes.append(
+                AgentRunOutcome(
+                    agent_id=agent_id,
+                    capability=capability,
+                    task_id=str(task.id),
+                    status=task.status,
+                    output_json=task.output_json,
+                    error=task.error,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - one agent's failure shouldn't stop the rest
+            session.rollback()
+            outcomes.append(
+                AgentRunOutcome(
+                    agent_id=agent_id,
+                    capability=capability,
+                    task_id=None,
+                    status="failed",
+                    output_json=None,
+                    error=str(exc),
+                )
+            )
+    return result, outcomes

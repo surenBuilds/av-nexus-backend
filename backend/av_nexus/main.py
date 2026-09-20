@@ -21,6 +21,7 @@ from av_nexus.api import (
     memory,
     orchestrator,
     tasks,
+    telegram,
     workflows,
 )
 from av_nexus.config import settings
@@ -41,6 +42,7 @@ ROUTERS = [
     activity.router,
     workflows.router,
     integrations.router,
+    telegram.router,
 ]
 
 

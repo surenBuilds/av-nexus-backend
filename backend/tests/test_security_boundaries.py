@@ -283,7 +283,13 @@ def _protected_routes(client: TestClient) -> list[tuple[str, str]]:
     for path, operations in spec["paths"].items():
         if not path.startswith(API):
             continue
-        if path in (f"{API}/auth/register", f"{API}/auth/login"):
+        if path in (
+            f"{API}/auth/register",
+            f"{API}/auth/login",
+            f"{API}/integrations/telegram/webhook",  # Telegram can't send our JWT;
+            # authenticated instead via X-Telegram-Bot-Api-Secret-Token (see
+            # test_telegram_webhook.py for that route's own auth tests).
+        ):
             continue
         for verb in ("get", "post", "put", "patch", "delete"):
             if verb in operations:

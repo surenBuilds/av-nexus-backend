@@ -99,7 +99,7 @@ def test_map_brief_empty_data_produces_warnings_not_fake_numbers() -> None:
 def test_sync_endpoint_runs_all_five_agents_from_real_brief(client: TestClient) -> None:
     headers = register_and_login(client)
     with patch(
-        "av_nexus.api.integrations.VoxlineClient.fetch_ceo_brief",
+        "av_nexus.integrations.voxline.VoxlineClient.fetch_ceo_brief",
         return_value=REAL_BRIEF,
     ):
         resp = client.post(f"{API}/integrations/voxline/sync", headers=headers)
@@ -119,7 +119,7 @@ def test_sync_endpoint_runs_all_five_agents_from_real_brief(client: TestClient) 
 def test_sync_endpoint_returns_502_when_voxline_unreachable(client: TestClient) -> None:
     headers = register_and_login(client)
     with patch(
-        "av_nexus.api.integrations.VoxlineClient.fetch_ceo_brief",
+        "av_nexus.integrations.voxline.VoxlineClient.fetch_ceo_brief",
         side_effect=VoxlineUnavailableError("Could not reach Voxline at http://example.invalid/api/ceo/brief"),
     ):
         resp = client.post(f"{API}/integrations/voxline/sync", headers=headers)

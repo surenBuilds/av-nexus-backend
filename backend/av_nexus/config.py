@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     voxline_base_url: str = ""
     voxline_api_key: str = ""
 
+    # Telegram integration: lets one bound AV Nexus account query the
+    # management agents from Telegram. Empty token means the integration is
+    # off. allowed_chat_id restricts replies to a single chat — without it
+    # set, the webhook refuses to run agents for anyone (fails closed, not
+    # open, since this endpoint is publicly reachable).
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
+    telegram_allowed_chat_id: str = ""
+    telegram_bound_user_email: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

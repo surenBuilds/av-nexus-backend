@@ -2,8 +2,8 @@
 
 Works with any OpenAI-compatible chat completions endpoint — OpenAI itself,
 or another provider that speaks the same API (e.g. Groq's
-https://api.groq.com/openai/v1). Point AVNEXUS_LLM__BASE_URL at the
-provider's endpoint and AVNEXUS_LLM__API_KEY at its key; nothing
+https://api.groq.com/openai/v1). Point AVNEXUS_LLM_BASE_URL at the
+provider's endpoint and AVNEXUS_LLM_API_KEY at its key; nothing
 provider-specific is hardcoded here.
 """
 
@@ -32,7 +32,7 @@ class OpenAIClient:
         self.base_url = base_url or settings.llm_base_url
         self.timeout = timeout or settings.llm_timeout_seconds
         if require_api_key and not self.api_key:
-            raise ProviderError("AVNEXUS_LLM__API_KEY is not set; cannot use LLM provider")
+            raise ProviderError("AVNEXUS_LLM_API_KEY is not set; cannot use LLM provider")
 
     def _provider_label(self) -> str:
         # Report which endpoint actually answered, not a hardcoded "openai" —
