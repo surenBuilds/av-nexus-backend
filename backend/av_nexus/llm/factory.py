@@ -36,6 +36,16 @@ def _build_real_client() -> LLMClient:
         from av_nexus.llm.openai_client import OpenAIClient
 
         return OpenAIClient(base_url=settings.llm_base_url, require_api_key=False)
+    if provider == "groq":
+        from av_nexus.llm.openai_client import OpenAIClient
+
+        # Groq speaks the OpenAI chat-completions API; only the base URL
+        # differs, so this reuses OpenAIClient rather than duplicating it.
+        # An explicitly-set AVNEXUS_LLM__BASE_URL still wins over this default.
+        base_url = settings.llm_base_url
+        if base_url == "https://api.openai.com/v1":
+            base_url = "https://api.groq.com/openai/v1"
+        return OpenAIClient(base_url=base_url)
     if provider == "openai":
         from av_nexus.llm.openai_client import OpenAIClient
 

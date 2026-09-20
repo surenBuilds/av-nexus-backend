@@ -1,6 +1,15 @@
-"""OpenAI-compatible HTTP LLM client (provider via settings; no keys in code)."""
+"""OpenAI-compatible HTTP LLM client (provider via settings; no keys in code).
+
+Works with any OpenAI-compatible chat completions endpoint — OpenAI itself,
+or another provider that speaks the same API (e.g. Groq's
+https://api.groq.com/openai/v1). Point AVNEXUS_LLM__BASE_URL at the
+provider's endpoint and AVNEXUS_LLM__API_KEY at its key; nothing
+provider-specific is hardcoded here.
+"""
 
 from __future__ import annotations
+
+from urllib.parse import urlparse
 
 import httpx
 
@@ -25,6 +34,16 @@ class OpenAIClient:
         if require_api_key and not self.api_key:
             raise ProviderError("AVNEXUS_LLM__API_KEY is not set; cannot use LLM provider")
 
+    def _provider_label(self) -> str:
+        # Report which endpoint actually answered, not a hardcoded "openai" —
+        # e.g. api.groq.com should show up as "groq", not be mislabeled.
+        host = urlparse(self.base_url).hostname or ""
+        if "groq" in host:
+            return "groq"
+        if "openai" in host:
+            return "openai"
+        return host or "openai_compatible"
+
     def complete(self, system: str, user: str) -> LLMResult:
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         body = {
@@ -46,5 +65,5 @@ class OpenAIClient:
                 content=content,
                 tokens_in=int(usage.get("prompt_tokens", 0)),
                 tokens_out=int(usage.get("completion_tokens", 0)),
-                provider="openai",
+                provider=self._provider_label(),
             )

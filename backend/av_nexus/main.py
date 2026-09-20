@@ -17,6 +17,7 @@ from av_nexus.api import (
     auth,
     companies,
     dashboard,
+    integrations,
     memory,
     orchestrator,
     tasks,
@@ -39,6 +40,7 @@ ROUTERS = [
     orchestrator.router,
     activity.router,
     workflows.router,
+    integrations.router,
 ]
 
 

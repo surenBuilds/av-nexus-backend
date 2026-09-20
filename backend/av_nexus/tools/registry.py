@@ -294,13 +294,39 @@ def _tool_company_context(ctx: ToolContext, tool: ToolDef, args: dict[str, Any])
 
 
 def _tool_research_web(ctx: ToolContext, tool: ToolDef, args: dict[str, Any]) -> dict[str, Any]:
-    """Permanently gated this phase: no unfettered internet. Never fakes results."""
+    """Real web search via DuckDuckGo when enabled; never fakes results.
+
+    Gated by settings.research_tool_enabled (default OFF) so this stays an
+    explicit opt-in per deployment. When it fails or returns nothing, that
+    is reported honestly in `note` rather than backfilled with invented
+    results.
+    """
     if not settings.research_tool_enabled:
         raise ToolPermissionError("external research is disabled in this phase")
-    return {
-        "results": [],
-        "note": "research_web is not configured; no external data was fetched.",
-    }
+
+    query = str(args.get("query", "")).strip()
+    if not query:
+        return {"results": [], "note": "empty query — nothing searched"}
+
+    max_results = int(args.get("max_results", 5) or 5)
+    try:
+        from ddgs import DDGS
+
+        with DDGS() as ddgs:
+            hits = list(ddgs.text(query, max_results=max_results))
+    except Exception as exc:  # noqa: BLE001 - any search failure is reported, not swallowed into fake data
+        return {"results": [], "note": f"web search failed: {exc}"}
+
+    results = [
+        {
+            "title": h.get("title", ""),
+            "url": h.get("href") or h.get("link", ""),
+            "snippet": h.get("body", ""),
+        }
+        for h in hits
+    ]
+    note = f"{len(results)} real result(s) from DuckDuckGo" if results else "no results found"
+    return {"results": results, "note": note}
 
 
 _CALLS = {
@@ -347,9 +373,9 @@ def default_tools() -> list[ToolDef]:
         ),
         ToolDef(
             "research_web",
-            "External web research (gated OFF this phase)",
+            "Real DuckDuckGo web search (opt-in via AVNEXUS_RESEARCH_TOOL_ENABLED)",
             "external",
-            {"query": "string"},
+            {"query": "string", "max_results": "number|optional"},
         ),
     ]
 

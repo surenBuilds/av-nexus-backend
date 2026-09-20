@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     max_tasks_per_run: int = 20
     agent_retries: int = 2
 
+    # Voxline AI Sales OS integration: real data source for the management
+    # agents. Empty base_url means the integration is simply off — no default
+    # or hardcoded URL, so a misconfigured deployment fails loudly (calling
+    # the endpoint raises) instead of silently pointing at someone else's data.
+    voxline_base_url: str = ""
+    voxline_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
