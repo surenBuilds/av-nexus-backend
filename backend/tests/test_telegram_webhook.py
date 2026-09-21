@@ -10,7 +10,7 @@ Telegram send, never the agent logic itself.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -123,3 +123,20 @@ def test_webhook_single_agent_command_runs_only_that_agent(client: TestClient) -
     assert "Sales" in sent_text
     assert "CEO" not in sent_text
     assert "Nairi Medical Center" in sent_text
+
+
+def test_send_message_logs_instead_of_silently_swallowing_telegram_rejection(capsys) -> None:
+    # This is the exact bug that made the bot look broken: Telegram
+    # returning a non-200 (e.g. bad request) isn't a network error, so
+    # httpx doesn't raise — it must be checked explicitly or a failed send
+    # looks identical to a successful one.
+    from av_nexus.integrations.telegram import TelegramClient
+
+    client = TelegramClient(bot_token="fake-token")
+    mock_response = MagicMock()
+    mock_response.status_code = 400
+    mock_response.text = '{"ok":false,"description":"Bad Request: can\'t parse entities"}'
+    with patch("httpx.post", return_value=mock_response):
+        client.send_message("123", "hello")
+    captured = capsys.readouterr()
+    assert "sendMessage failed 400" in captured.out
