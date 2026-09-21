@@ -43,9 +43,34 @@ class TelegramClient:
 
 HELP_TEXT = (
     "AV Nexus — հրամաններ\n"
-    "/brief — ամփոփ CEO/Finance/Marketing/Operations/Sales վերանայում իրական Voxline տվյալով\n"
-    "/ceo, /finance, /marketing, /operations, /sales — միայն այդ agent-ը"
+    "/brief — ամփոփ Տնօրեն/Ֆինանսներ/Մարքեթինգ/Գործառնություններ/Վաճառք վերանայում\n"
+    "իրական Voxline տվյալով\n"
+    "/ceo, /finance, /marketing, /operations, /sales — միայն այդ ուղղությունը"
 )
+
+# Known, fixed warning strings from av_nexus.integrations.voxline translated
+# for Telegram. An unmapped warning falls back to its original English text
+# rather than being silently dropped or mistranslated.
+WARNING_TRANSLATIONS: dict[str, str] = {
+    (
+        "Voxline has no expense/cash/COGS tracking yet — finance agent runs on revenue only; "
+        "gross/net margin and runway will reflect that gap, not be guessed."
+    ): (
+        "Voxline-ը դեռ ծախսեր/քեշ չի հետևում. finance agent-ը հաշվարկում է միայն եկամուտից. "
+        "margin-ը և runway-ն կարտացոլեն այս բացը, չեն գուշակվի։"
+    ),
+    (
+        "Voxline has no project/delivery tracking — operations agent input is genuinely "
+        "empty, not fabricated."
+    ): (
+        "Voxline-ը project tracking չունի. operations agent-ի input-ը իրապես "
+        "դատարկ է, ոչ թե հորինված։"
+    ),
+}
+
+
+def translate_warning(warning: str) -> str:
+    return WARNING_TRANSLATIONS.get(warning, warning)
 
 
 def format_agent_summary(
@@ -57,29 +82,41 @@ def format_agent_summary(
 
     if agent_id == "ceo":
         kpis = result.get("kpi_review", [])
+        # KPI names come through from Voxline's own weekly_goals metric
+        # labels (see integrations/voxline.py) — translate the known ones,
+        # leave anything else as-is rather than guessing a translation.
+        kpi_name_map = {
+            "Qualified Leads": "Որակավորված leads",
+            "Meetings Scheduled": "Պլանավորված հանդիպումներ",
+            "Pipeline Added ($)": "Ավելացված pipeline ($)",
+        }
         kpi_lines = (
-            "\n".join(f"  • {k.get('name')}: {k.get('value')}" for k in kpis) or "  (no KPI data)"
+            "\n".join(
+                f"  • {kpi_name_map.get(k.get('name'), k.get('name'))}: {k.get('value')}"
+                for k in kpis
+            )
+            or "  (KPI տվյալ չկա)"
         )
         return (
-            f"👑 CEO — health {result.get('company_health_score', 'n/a')}\n"
+            f"👑 Տնօրեն (CEO) — առողջության ցուցանիշ {result.get('company_health_score', 'n/a')}\n"
             f"{kpi_lines}\n"
-            f"Focus: {result.get('weekly_focus', 'n/a')}"
+            f"Ֆոկուս. {result.get('weekly_focus', 'n/a')}"
         )
     if agent_id == "finance":
         return (
-            f"💰 Finance — health {result.get('financial_health_score', 'n/a')}\n"
-            f"Revenue: ${result.get('revenue', 0)} · "
+            f"💰 Ֆինանսներ — առողջության ցուցանիշ {result.get('financial_health_score', 'n/a')}\n"
+            f"Եկամուտ՝ ${result.get('revenue', 0)} · "
             f"LTV:CAC {result.get('ltv_cac_ratio', 'n/a')} · "
-            f"Runway: {result.get('runway_months', 'n/a')} months"
+            f"Ինքնավարության ժամկետ (runway)՝ {result.get('runway_months', 'n/a')} ամիս"
         )
     if agent_id == "marketing":
-        return f"📣 Marketing — {result.get('positioning', 'n/a')}"
+        return f"📣 Մարքեթինգ — {result.get('positioning', 'n/a')}"
     if agent_id == "operations":
-        flags = ", ".join(result.get("process_flags", [])) or "no flags"
+        flags = ", ".join(result.get("process_flags", [])) or "flag չկա"
         reviewed = result.get("projects_reviewed", 0)
-        return f"⚙️ Operations — {reviewed} project(s) reviewed · {flags}"
+        return f"⚙️ Գործառնություններ — {reviewed} project վերանայված · {flags}"
     if agent_id == "sales":
         leads = result.get("scored_leads", [])[:5]
         lead_lines = "\n".join(f"  • {ld.get('lead')}: {ld.get('score')}" for ld in leads)
-        return f"🎯 Sales — top leads\n{lead_lines or '  (no leads)'}"
+        return f"🎯 Վաճառք — թոփ lead-ներ\n{lead_lines or '  (lead չկա)'}"
     return f"{agent_id}: {result}"

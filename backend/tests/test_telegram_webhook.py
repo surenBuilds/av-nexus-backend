@@ -100,7 +100,7 @@ def test_webhook_brief_runs_all_five_agents_from_real_voxline_data(client: TestC
     assert resp.status_code == 200
     mock_send.assert_called_once()
     sent_text = mock_send.call_args.args[1]
-    for label in ("CEO", "Finance", "Marketing", "Operations", "Sales"):
+    for label in ("Տնօրեն", "Ֆինանսներ", "Մարքեթինգ", "Գործառնություններ", "Վաճառք"):
         assert label in sent_text
     assert "Nairi Medical Center" in sent_text
 
@@ -120,9 +120,28 @@ def test_webhook_single_agent_command_runs_only_that_agent(client: TestClient) -
         )
     assert resp.status_code == 200
     sent_text = mock_send.call_args.args[1]
-    assert "Sales" in sent_text
-    assert "CEO" not in sent_text
+    assert "Վաճառք" in sent_text
+    assert "Տնօրեն" not in sent_text
     assert "Nairi Medical Center" in sent_text
+
+
+def test_webhook_translates_known_warnings_to_armenian(client: TestClient) -> None:
+    register_and_login(client)
+    _telegram_settings()
+    with (
+        patch(
+            "av_nexus.integrations.voxline.VoxlineClient.fetch_ceo_brief",
+            return_value=REAL_BRIEF,
+        ),
+        patch("av_nexus.api.telegram.TelegramClient.send_message") as mock_send,
+    ):
+        resp = client.post(
+            WEBHOOK, json=_update("/brief"), headers={SECRET_HEADER: "test-webhook-secret"}
+        )
+    assert resp.status_code == 200
+    sent_text = mock_send.call_args.args[1]
+    assert "Voxline-ը դեռ ծախսեր" in sent_text
+    assert "Voxline has no expense" not in sent_text
 
 
 def test_send_message_logs_instead_of_silently_swallowing_telegram_rejection(capsys) -> None:

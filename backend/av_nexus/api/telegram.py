@@ -20,7 +20,12 @@ from fastapi.responses import JSONResponse
 from av_nexus.config import settings
 from av_nexus.core.security import get_org_for_user
 from av_nexus.db.session import create_session
-from av_nexus.integrations.telegram import HELP_TEXT, TelegramClient, format_agent_summary
+from av_nexus.integrations.telegram import (
+    HELP_TEXT,
+    TelegramClient,
+    format_agent_summary,
+    translate_warning,
+)
 from av_nexus.integrations.voxline import VoxlineUnavailableError, run_agents_from_voxline
 from av_nexus.models.identity import User
 
@@ -102,7 +107,8 @@ async def telegram_webhook(
 
         parts = [format_agent_summary(o.agent_id, o.output_json, o.error) for o in outcomes]
         if result.warnings:
-            parts.append("\n⚠️ " + "\n⚠️ ".join(result.warnings))
+            translated = [translate_warning(w) for w in result.warnings]
+            parts.append("\n⚠️ " + "\n⚠️ ".join(translated))
         telegram.send_message(chat_id, "\n\n".join(parts))
     finally:
         session.close()
