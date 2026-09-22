@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     telegram_allowed_chat_id: str = ""
     telegram_bound_user_email: str = ""
 
+    # Coding agent: GitHub write access, scoped to an explicit repo
+    # allowlist so a malformed input can never target an arbitrary repo.
+    # Branch+PR only — nothing in this codebase ever pushes to a base
+    # branch directly.
+    github_token: str = ""
+    github_allowed_repos: str = ""  # comma-separated "owner/repo" list
+
 
 @lru_cache
 def get_settings() -> Settings:

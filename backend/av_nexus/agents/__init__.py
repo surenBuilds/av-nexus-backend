@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from av_nexus.agents.base import AgentContext, AgentResult, BaseAgent
 from av_nexus.agents.builder import ValidationAgent, VentureBuilderAgent
+from av_nexus.agents.coding import CodingAgent
 from av_nexus.agents.group_strategy import InvestmentAgent, MnAAgent, StrategyAgent
 from av_nexus.agents.guardian import (
     CriticAgent,
@@ -62,6 +63,7 @@ ALL_AGENTS: list[BaseAgent] = [
     MnAAgent(),
     DataAnalyticsAgent(),
     CriticAgent(),
+    CodingAgent(),
 ]
 
 _registry: AgentRegistry | None = None

@@ -36,14 +36,14 @@ def test_token_roundtrip() -> None:
 
 def test_all_agents_registered_count_and_uniqueness() -> None:
     registry = build_registry()
-    assert registry.count() == 18
+    assert registry.count() == 19
     assert len(registry.agent_ids()) == len(set(registry.agent_ids()))
     ids = set()
     for a in ALL_AGENTS:
         assert a.agent_id
         assert a.capabilities
         ids.add(a.agent_id)
-    assert len(ids) == 18
+    assert len(ids) == 19
 
 
 def test_find_by_capability_routes_to_multiple_agents() -> None:

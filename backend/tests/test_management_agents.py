@@ -285,7 +285,7 @@ def test_mna_agent_honest_when_no_targets_supplied(client: TestClient) -> None:
     assert out["result"]["matches"] == []
 
 
-def test_all_18_agents_are_listed_and_none_are_fabricated_shells(client: TestClient) -> None:
+def test_all_19_agents_are_listed_and_none_are_fabricated_shells(client: TestClient) -> None:
     """Regression guard: confirms the full registry (not just the 8-agent
     venture pipeline) is reachable via the real API."""
     headers = register_and_login(client)
@@ -310,4 +310,5 @@ def test_all_18_agents_are_listed_and_none_are_fabricated_shells(client: TestCli
         "mna",
         "data_analytics",
         "critic",
+        "coding",
     }

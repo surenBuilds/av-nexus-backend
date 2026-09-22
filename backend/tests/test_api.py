@@ -38,7 +38,7 @@ def test_agents_registered_after_lifespan(client: TestClient) -> None:
     headers = register_and_login(client)
     agents = client.get(f"{API}/agents", headers=headers)
     assert agents.status_code == 200
-    assert len(agents.json()) == 18
+    assert len(agents.json()) == 19
     ids = {a["agent_id"] for a in agents.json()}
     assert {"strategy", "opportunity_scout", "critic", "risk", "legal_compliance"} <= ids
 
@@ -149,7 +149,7 @@ def test_dashboard_shape(client: TestClient) -> None:
     assert "pending_approvals" in body
     assert "agent_activity" in body
     assert "group_performance" in body
-    assert len(body["agent_activity"]) == 18  # synced during lifespan
+    assert len(body["agent_activity"]) == 19  # synced during lifespan
 
 
 def test_orchestrator_pipeline_via_api(client: TestClient) -> None:

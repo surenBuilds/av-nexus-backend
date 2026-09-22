@@ -33,6 +33,7 @@ from av_nexus.models.enums import (
 from av_nexus.models.identity import Organization, User
 from av_nexus.orchestrator import kernel
 from av_nexus.orchestrator.pipelines import describe_pipeline, plan_pipeline
+from av_nexus.tools.registry import build_tool_registry
 
 
 class OrchestratorService:
@@ -180,6 +181,7 @@ class OrchestratorService:
             llm=self.llm,
             inputs=dict(task.input_json or {}),
             data=self._context_data(org),
+            tools=build_tool_registry(self.session, org.id, agent.permissions),
         )
         result: AgentResult | None = None
         error: str | None = None

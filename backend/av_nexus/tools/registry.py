@@ -329,6 +329,153 @@ def _tool_research_web(ctx: ToolContext, tool: ToolDef, args: dict[str, Any]) ->
     return {"results": results, "note": note}
 
 
+def _github_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {settings.github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _github_repo_allowed(repo: str) -> bool:
+    allowed = {r.strip() for r in settings.github_allowed_repos.split(",") if r.strip()}
+    return repo in allowed
+
+
+def _tool_github_read_file(
+    ctx: ToolContext, tool: ToolDef, args: dict[str, Any]
+) -> dict[str, Any]:
+    """Read one real file's content from GitHub. Never invents file contents —
+    a missing file or read failure is reported, not filled in with a guess."""
+    import base64
+
+    import httpx
+
+    repo = str(args.get("repo", ""))
+    path = str(args.get("path", ""))
+    ref = str(args.get("ref", "") or "")
+    if not settings.github_token:
+        return {"ok": False, "error": "AVNEXUS_GITHUB_TOKEN is not configured"}
+    if not _github_repo_allowed(repo):
+        raise ToolPermissionError(f"repo '{repo}' is not in AVNEXUS_GITHUB_ALLOWED_REPOS")
+    if not path:
+        return {"ok": False, "error": "path is required"}
+
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    params = {"ref": ref} if ref else {}
+    try:
+        resp = httpx.get(url, headers=_github_headers(), params=params, timeout=15.0)
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"network error: {exc}"}
+    if resp.status_code == 404:
+        return {"ok": False, "error": f"file not found: {path}"}
+    if resp.status_code != 200:
+        return {"ok": False, "error": f"GitHub returned {resp.status_code}: {resp.text[:300]}"}
+    data = resp.json()
+    if data.get("encoding") != "base64":
+        return {"ok": False, "error": f"unexpected encoding: {data.get('encoding')}"}
+    content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+    return {"ok": True, "path": path, "content": content, "sha": data.get("sha")}
+
+
+def _tool_github_propose_pr(
+    ctx: ToolContext, tool: ToolDef, args: dict[str, Any]
+) -> dict[str, Any]:
+    """Create a branch, commit the given files, and open a PR against base.
+
+    Never touches the base branch directly — this tool has no code path that
+    writes to `base`; it only ever creates a new branch and a pull request
+    for a human to review and merge.
+    """
+    import base64
+
+    import httpx
+
+    repo = str(args.get("repo", ""))
+    base = str(args.get("base", "main"))
+    branch = str(args.get("branch", ""))
+    title = str(args.get("title", ""))
+    body = str(args.get("body", ""))
+    files = args.get("files") or []
+
+    if not settings.github_token:
+        return {"ok": False, "error": "AVNEXUS_GITHUB_TOKEN is not configured"}
+    if not _github_repo_allowed(repo):
+        raise ToolPermissionError(f"repo '{repo}' is not in AVNEXUS_GITHUB_ALLOWED_REPOS")
+    if not branch or branch == base:
+        return {"ok": False, "error": "a branch name distinct from base is required"}
+    if not isinstance(files, list) or not files:
+        return {"ok": False, "error": "files must be a non-empty list of {path, content}"}
+
+    headers = _github_headers()
+    api = f"https://api.github.com/repos/{repo}"
+
+    try:
+        base_ref = httpx.get(f"{api}/git/ref/heads/{base}", headers=headers, timeout=15.0)
+        if base_ref.status_code != 200:
+            return {
+                "ok": False,
+                "error": f"could not read base branch '{base}': {base_ref.text[:300]}",
+            }
+        base_sha = base_ref.json()["object"]["sha"]
+
+        create_branch = httpx.post(
+            f"{api}/git/refs",
+            headers=headers,
+            json={"ref": f"refs/heads/{branch}", "sha": base_sha},
+            timeout=15.0,
+        )
+        if create_branch.status_code not in (201, 422):  # 422: branch already exists — reuse it
+            return {"ok": False, "error": f"could not create branch: {create_branch.text[:300]}"}
+
+        for f in files:
+            if not isinstance(f, dict) or "path" not in f or "content" not in f:
+                return {"ok": False, "error": f"malformed file entry: {f!r}"}
+            path = f["path"]
+            existing = httpx.get(
+                f"{api}/contents/{path}", headers=headers, params={"ref": branch}, timeout=15.0
+            )
+            put_body: dict[str, Any] = {
+                "message": f.get("message", f"Update {path}"),
+                "content": base64.b64encode(f["content"].encode("utf-8")).decode("ascii"),
+                "branch": branch,
+            }
+            if existing.status_code == 200:
+                put_body["sha"] = existing.json()["sha"]
+            put_resp = httpx.put(
+                f"{api}/contents/{path}", headers=headers, json=put_body, timeout=15.0
+            )
+            if put_resp.status_code not in (200, 201):
+                return {
+                    "ok": False,
+                    "error": f"could not write {path}: {put_resp.text[:300]}",
+                }
+
+        pr_resp = httpx.post(
+            f"{api}/pulls",
+            headers=headers,
+            json={
+                "title": title or f"Automated changes on {branch}",
+                "head": branch,
+                "base": base,
+                "body": body,
+            },
+            timeout=15.0,
+        )
+        if pr_resp.status_code not in (201, 422):  # 422: PR may already exist for this branch
+            return {"ok": False, "error": f"could not open PR: {pr_resp.text[:300]}"}
+        if pr_resp.status_code == 201:
+            pr_data = pr_resp.json()
+            return {"ok": True, "pr_url": pr_data["html_url"], "pr_number": pr_data["number"]}
+        return {
+            "ok": True,
+            "pr_url": None,
+            "note": "branch pushed; a PR for it may already be open",
+        }
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"network error: {exc}"}
+
+
 _CALLS = {
     "calculator": _tool_calculator,
     "structured_analysis": _tool_structured_analysis,
@@ -336,6 +483,8 @@ _CALLS = {
     "internal_knowledge_search": _tool_internal_knowledge_search,
     "company_context": _tool_company_context,
     "research_web": _tool_research_web,
+    "github_read_file": _tool_github_read_file,
+    "github_propose_pr": _tool_github_propose_pr,
 }
 
 
@@ -376,6 +525,25 @@ def default_tools() -> list[ToolDef]:
             "Real DuckDuckGo web search (opt-in via AVNEXUS_RESEARCH_TOOL_ENABLED)",
             "external",
             {"query": "string", "max_results": "number|optional"},
+        ),
+        ToolDef(
+            "github_read_file",
+            "Read one real file's content from an allowlisted GitHub repo",
+            "code_write",
+            {"repo": "string", "path": "string", "ref": "string|optional"},
+        ),
+        ToolDef(
+            "github_propose_pr",
+            "Create a branch, commit files, and open a PR — never writes to base directly",
+            "code_write",
+            {
+                "repo": "string",
+                "base": "string",
+                "branch": "string",
+                "title": "string",
+                "body": "string",
+                "files": "list[{path, content}]",
+            },
         ),
     ]
 
