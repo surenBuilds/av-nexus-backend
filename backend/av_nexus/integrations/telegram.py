@@ -45,7 +45,9 @@ HELP_TEXT = (
     "AV Nexus — հրամաններ\n"
     "/brief — ամփոփ Տնօրեն/Ֆինանսներ/Մարքեթինգ/Գործառնություններ/Վաճառք վերանայում\n"
     "իրական Voxline տվյալով\n"
-    "/ceo, /finance, /marketing, /operations, /sales — միայն այդ ուղղությունը"
+    "/ceo, /finance, /marketing, /operations, /sales — միայն այդ ուղղությունը\n"
+    "/code <նկարագրություն> — Coding Agent-ը կարդում է կոդը, առաջարկում է իրական\n"
+    "փոփոխություն որպես PR (երբեք ուղիղ push main-ին)"
 )
 
 # Known, fixed warning strings from av_nexus.integrations.voxline translated
@@ -71,6 +73,29 @@ WARNING_TRANSLATIONS: dict[str, str] = {
 
 def translate_warning(warning: str) -> str:
     return WARNING_TRANSLATIONS.get(warning, warning)
+
+
+def format_coding_result(output_json: dict[str, Any] | None, error: str | None) -> str:
+    if error:
+        return f"❌ Կոդային փոփոխություն failed. {error}"
+    result = (output_json or {}).get("result", {}) if output_json else {}
+    status = result.get("status")
+    if status == "not_generated":
+        reason = result.get("reason")
+        if reason == "repo_required":
+            return "❌ repo նշված չէ։ Օգտագործում. /code <նկարագրություն>"
+        return "❌ LLM provider-ը կոնֆիգուրացված չէ (GROQ_API_KEY)։ Ոչինչ չի գրվել։"
+    if result.get("pr_opened"):
+        files = ", ".join(result.get("files_changed", [])) or "(ֆայլ չկա)"
+        return (
+            f"✅ Իրական PR բացվեց՝ {result.get('pr_url')}\n"
+            f"Ֆայլեր. {files}\n"
+            f"Ամփոփում. {result.get('summary', 'n/a')}"
+        )
+    return (
+        f"⚠️ Կոդը գրվեց, բայց PR-ը չբացվեց. {result.get('pr_error', 'unknown error')}\n"
+        f"Branch. {result.get('branch', 'n/a')}"
+    )
 
 
 def format_agent_summary(

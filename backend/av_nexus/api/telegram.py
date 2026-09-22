@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from av_nexus.config import settings
 from av_nexus.core.security import get_org_for_user
@@ -24,10 +25,14 @@ from av_nexus.integrations.telegram import (
     HELP_TEXT,
     TelegramClient,
     format_agent_summary,
+    format_coding_result,
     translate_warning,
 )
 from av_nexus.integrations.voxline import VoxlineUnavailableError, run_agents_from_voxline
-from av_nexus.models.identity import User
+from av_nexus.llm.factory import build_llm_client
+from av_nexus.models.agents import Task
+from av_nexus.models.identity import Organization, User
+from av_nexus.orchestrator.service import OrchestratorService
 
 router = APIRouter(prefix="/integrations/telegram", tags=["integrations"])
 
@@ -77,12 +82,13 @@ async def telegram_webhook(
         telegram.send_message(chat_id, HELP_TEXT)
         return JSONResponse({"ok": True})
 
-    agent_ids: list[str] | None
+    is_code_command = text.startswith("/code")
+    agent_ids: list[str] | None = None
     if text == "/brief":
         agent_ids = None  # all 5
     elif text in _SINGLE_AGENT_COMMANDS:
         agent_ids = [_SINGLE_AGENT_COMMANDS[text]]
-    else:
+    elif not is_code_command:
         telegram.send_message(chat_id, "Չճանաչված հրաման։\n\n" + HELP_TEXT)
         return JSONResponse({"ok": True})
 
@@ -97,6 +103,21 @@ async def telegram_webhook(
         org = get_org_for_user(session, user)
         if org is None:
             telegram.send_message(chat_id, "❌ Bound account has no organization")
+            return JSONResponse({"ok": True})
+
+        if is_code_command:
+            task_text = text[len("/code") :].strip()
+            if not task_text:
+                telegram.send_message(chat_id, "Օգտագործում. /code <նկարագրություն>")
+                return JSONResponse({"ok": True})
+            repo = (settings.github_allowed_repos or "").split(",")[0].strip()
+            if not repo:
+                telegram.send_message(
+                    chat_id, "❌ AVNEXUS_GITHUB_ALLOWED_REPOS-ը կոնֆիգուրացված չէ"
+                )
+                return JSONResponse({"ok": True})
+            task = await _run_coding_task(session, org, user, repo=repo, task_text=task_text)
+            telegram.send_message(chat_id, format_coding_result(task.output_json, task.error))
             return JSONResponse({"ok": True})
 
         try:
@@ -114,3 +135,27 @@ async def telegram_webhook(
         session.close()
 
     return JSONResponse({"ok": True})
+
+
+async def _run_coding_task(
+    session: Session, org: Organization, user: User, *, repo: str, task_text: str
+) -> Task:
+    """Create and run one Coding Agent task, routed purely by capability so
+    it always reaches CodingAgent regardless of registry ordering."""
+    from av_nexus.agents import get_registry
+
+    service = OrchestratorService(session, get_registry(), build_llm_client())
+    task = service.create_task(
+        org,
+        user,
+        title=f"Telegram /code — {task_text[:60]}",
+        goal=task_text,
+        capability="code_changes",
+        approval_level=1,
+        input_json={"repo": repo, "task": task_text, "context_files": []},
+    )
+    session.commit()
+    session.refresh(task)
+    await service.run_task(task, org, user)
+    session.refresh(task)
+    return task

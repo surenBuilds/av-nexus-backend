@@ -144,6 +144,65 @@ def test_webhook_translates_known_warnings_to_armenian(client: TestClient) -> No
     assert "Voxline has no expense" not in sent_text
 
 
+def test_webhook_code_command_runs_coding_agent_and_opens_pr(client: TestClient) -> None:
+    register_and_login(client)
+    _telegram_settings()
+    settings.github_allowed_repos = "surenBuilds/Krtlab-appp"
+
+    proposal = {
+        "branch_suffix": "fix-typo",
+        "title": "Fix typo",
+        "body": "body",
+        "summary": "Corrected a typo",
+        "files": [{"path": "README.md", "content": "fixed", "message": "fix"}],
+        "risks": [],
+    }
+    import json as _json
+
+    class _FakeLLM:
+        def complete(self, system: str, user: str):  # noqa: ANN001, ANN201
+            from av_nexus.llm.base import LLMResult
+
+            return LLMResult(content=f"```json\n{_json.dumps(proposal)}\n```", provider="fake")
+
+    ref_resp = MagicMock(status_code=200)
+    ref_resp.json.return_value = {"object": {"sha": "base-sha"}}
+    existing_resp = MagicMock(status_code=404)
+    branch_resp = MagicMock(status_code=201)
+    put_resp = MagicMock(status_code=201)
+    pr_resp = MagicMock(status_code=201)
+    pr_resp.json.return_value = {"html_url": "https://github.com/x/y/pull/9", "number": 9}
+
+    with (
+        patch("av_nexus.api.telegram.build_llm_client", return_value=_FakeLLM()),
+        patch("av_nexus.tools.registry.settings.github_token", "tok"),
+        patch("httpx.get", side_effect=[ref_resp, existing_resp]),
+        patch("httpx.post", side_effect=[branch_resp, pr_resp]),
+        patch("httpx.put", return_value=put_resp),
+        patch("av_nexus.api.telegram.TelegramClient.send_message") as mock_send,
+    ):
+        resp = client.post(
+            WEBHOOK,
+            json=_update("/code fix the typo in README"),
+            headers={SECRET_HEADER: "test-webhook-secret"},
+        )
+    assert resp.status_code == 200
+    sent_text = mock_send.call_args.args[1]
+    assert "PR" in sent_text
+    assert "https://github.com/x/y/pull/9" in sent_text
+
+
+def test_webhook_code_command_without_task_text_shows_usage(client: TestClient) -> None:
+    register_and_login(client)
+    _telegram_settings()
+    with patch("av_nexus.api.telegram.TelegramClient.send_message") as mock_send:
+        resp = client.post(
+            WEBHOOK, json=_update("/code"), headers={SECRET_HEADER: "test-webhook-secret"}
+        )
+    assert resp.status_code == 200
+    assert "Օգտագործում" in mock_send.call_args.args[1]
+
+
 def test_send_message_logs_instead_of_silently_swallowing_telegram_rejection(capsys) -> None:
     # This is the exact bug that made the bot look broken: Telegram
     # returning a non-200 (e.g. bad request) isn't a network error, so
