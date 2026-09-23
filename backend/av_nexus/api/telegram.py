@@ -108,7 +108,26 @@ async def telegram_webhook(
         if is_code_command:
             task_text = text[len("/code") :].strip()
             if not task_text:
-                telegram.send_message(chat_id, "Օգտագործում. /code <նկարագրություն>")
+                telegram.send_message(
+                    chat_id,
+                    "Օգտագործում. /code ֆայլ1,ֆայլ2 | նկարագրություն\n"
+                    "Օրինակ. /code package.json | bump react to ^18.2.0",
+                )
+                return JSONResponse({"ok": True})
+            if "|" in task_text:
+                files_part, _, task_desc = task_text.partition("|")
+                context_files = [f.strip() for f in files_part.split(",") if f.strip()]
+                task_text = task_desc.strip()
+            else:
+                context_files = []
+            if not context_files:
+                telegram.send_message(
+                    chat_id,
+                    "Ինձ պետք է իմանալ, թե որ ֆայլ(եր)ն ես ուզում, որ կարդամ ու փոփոխեմ, "
+                    "այլապես չեմ կարող իրական բովանդակություն տեսնել։\n\n"
+                    "Օգտագործում. /code ֆայլ1,ֆայլ2 | նկարագրություն\n"
+                    "Օրինակ. /code package.json | bump react to ^18.2.0",
+                )
                 return JSONResponse({"ok": True})
             repo = (settings.github_allowed_repos or "").split(",")[0].strip()
             if not repo:
@@ -116,7 +135,9 @@ async def telegram_webhook(
                     chat_id, "❌ AVNEXUS_GITHUB_ALLOWED_REPOS-ը կոնֆիգուրացված չէ"
                 )
                 return JSONResponse({"ok": True})
-            task = await _run_coding_task(session, org, user, repo=repo, task_text=task_text)
+            task = await _run_coding_task(
+                session, org, user, repo=repo, task_text=task_text, context_files=context_files
+            )
             telegram.send_message(chat_id, format_coding_result(task.output_json, task.error))
             return JSONResponse({"ok": True})
 
@@ -138,7 +159,13 @@ async def telegram_webhook(
 
 
 async def _run_coding_task(
-    session: Session, org: Organization, user: User, *, repo: str, task_text: str
+    session: Session,
+    org: Organization,
+    user: User,
+    *,
+    repo: str,
+    task_text: str,
+    context_files: list[str],
 ) -> Task:
     """Create and run one Coding Agent task, routed purely by capability so
     it always reaches CodingAgent regardless of registry ordering."""
@@ -152,7 +179,7 @@ async def _run_coding_task(
         goal=task_text,
         capability="code_changes",
         approval_level=1,
-        input_json={"repo": repo, "task": task_text, "context_files": []},
+        input_json={"repo": repo, "task": task_text, "context_files": context_files},
     )
     session.commit()
     session.refresh(task)

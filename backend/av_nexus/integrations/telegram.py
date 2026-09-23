@@ -46,8 +46,8 @@ HELP_TEXT = (
     "/brief — ամփոփ Տնօրեն/Ֆինանսներ/Մարքեթինգ/Գործառնություններ/Վաճառք վերանայում\n"
     "իրական Voxline տվյալով\n"
     "/ceo, /finance, /marketing, /operations, /sales — միայն այդ ուղղությունը\n"
-    "/code <նկարագրություն> — Coding Agent-ը կարդում է կոդը, առաջարկում է իրական\n"
-    "փոփոխություն որպես PR (երբեք ուղիղ push main-ին)"
+    "/code ֆայլ1,ֆայլ2 | նկարագրություն — Coding Agent-ը կարդում է նշված\n"
+    "ֆայլ(եր)ը, առաջարկում է իրական փոփոխություն որպես PR (երբեք ուղիղ push main-ին)"
 )
 
 # Known, fixed warning strings from av_nexus.integrations.voxline translated

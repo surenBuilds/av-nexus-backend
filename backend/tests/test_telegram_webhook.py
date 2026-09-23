@@ -165,6 +165,12 @@ def test_webhook_code_command_runs_coding_agent_and_opens_pr(client: TestClient)
 
             return LLMResult(content=f"```json\n{_json.dumps(proposal)}\n```", provider="fake")
 
+    read_resp = MagicMock(status_code=200)
+    read_resp.json.return_value = {
+        "encoding": "base64",
+        "content": __import__("base64").b64encode(b"a typo here").decode(),
+        "sha": "readsha",
+    }
     ref_resp = MagicMock(status_code=200)
     ref_resp.json.return_value = {"object": {"sha": "base-sha"}}
     existing_resp = MagicMock(status_code=404)
@@ -176,14 +182,14 @@ def test_webhook_code_command_runs_coding_agent_and_opens_pr(client: TestClient)
     with (
         patch("av_nexus.api.telegram.build_llm_client", return_value=_FakeLLM()),
         patch("av_nexus.tools.registry.settings.github_token", "tok"),
-        patch("httpx.get", side_effect=[ref_resp, existing_resp]),
+        patch("httpx.get", side_effect=[read_resp, ref_resp, existing_resp]),
         patch("httpx.post", side_effect=[branch_resp, pr_resp]),
         patch("httpx.put", return_value=put_resp),
         patch("av_nexus.api.telegram.TelegramClient.send_message") as mock_send,
     ):
         resp = client.post(
             WEBHOOK,
-            json=_update("/code fix the typo in README"),
+            json=_update("/code README.md | fix the typo in README"),
             headers={SECRET_HEADER: "test-webhook-secret"},
         )
     assert resp.status_code == 200
@@ -201,6 +207,27 @@ def test_webhook_code_command_without_task_text_shows_usage(client: TestClient) 
         )
     assert resp.status_code == 200
     assert "Օգտագործում" in mock_send.call_args.args[1]
+
+
+def test_webhook_code_command_without_file_list_asks_for_files_instead_of_guessing(
+    client: TestClient,
+) -> None:
+    # Regression test: the /code command used to always pass context_files=[],
+    # so the LLM could never see real file contents and honestly refused to
+    # propose changes — which looked like a broken bot rather than a usage
+    # problem. It must now ask for a file list up front instead of burning
+    # an LLM call and failing deep inside PR creation.
+    register_and_login(client)
+    _telegram_settings()
+    with patch("av_nexus.api.telegram.TelegramClient.send_message") as mock_send:
+        resp = client.post(
+            WEBHOOK,
+            json=_update("/code bump react to 18.2.0"),  # no "|", no file list
+            headers={SECRET_HEADER: "test-webhook-secret"},
+        )
+    assert resp.status_code == 200
+    sent_text = mock_send.call_args.args[1]
+    assert "Օգտագործում" in sent_text
 
 
 def test_send_message_logs_instead_of_silently_swallowing_telegram_rejection(capsys) -> None:
