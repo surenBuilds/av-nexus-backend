@@ -182,6 +182,62 @@ def test_coding_agent_without_llm_provider_proposes_nothing() -> None:
     assert result.result["status"] == "not_generated"
 
 
+def test_coding_agent_with_no_files_to_change_reports_no_change_not_a_failure(db_session) -> None:
+    """Regression test: when the LLM correctly determines the real files
+    already satisfy the task (e.g. a version bump that's already met), that
+    is a legitimate outcome — not a failed PR attempt. No GitHub write calls
+    should happen at all in this case."""
+    settings.github_token = "tok"
+    settings.github_allowed_repos = "surenBuilds/Krtlab-appp"
+
+    proposal = {
+        "branch_suffix": "react-bump",
+        "title": "n/a",
+        "body": "n/a",
+        "summary": "react is already ^19.0.0, above the requested ^18.2.0 — no change needed",
+        "files": [],
+        "risks": [],
+    }
+    import json as _json
+
+    llm = FakeLLM(lambda _user: _json.dumps(proposal))
+
+    org_id = uuid.uuid4()
+    tools = build_tool_registry(db_session, org_id, CodingAgent().permissions)
+    ctx = AgentContext(
+        org_id=org_id,
+        llm=llm,
+        inputs={
+            "repo": "surenBuilds/Krtlab-appp",
+            "task": "bump react to 18.2.0 if below",
+            "context_files": ["package.json"],
+        },
+        tools=tools,
+    )
+
+    read_resp = MagicMock(status_code=200)
+    read_resp.json.return_value = {
+        "encoding": "base64",
+        "content": base64.b64encode(b'"react": "^19.0.0"').decode(),
+        "sha": "sha",
+    }
+
+    with (
+        patch("httpx.get", return_value=read_resp) as mock_get,
+        patch("httpx.post") as mock_post,
+        patch("httpx.put") as mock_put,
+    ):
+        result = asyncio.run(CodingAgent().run(ctx, "bump react"))
+
+    assert result.mode == "llm"
+    assert result.result["status"] == "no_change_needed"
+    assert result.result["pr_opened"] is False
+    # Only the one context-file read happened — no branch/PR/commit calls.
+    assert mock_get.call_count == 1
+    mock_post.assert_not_called()
+    mock_put.assert_not_called()
+
+
 def test_coding_agent_full_flow_opens_real_pr_from_real_llm_proposal(db_session) -> None:
     settings.github_token = "tok"
     settings.github_allowed_repos = "surenBuilds/Krtlab-appp"

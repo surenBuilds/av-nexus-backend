@@ -116,6 +116,29 @@ class CodingAgent(BaseAgent):
                 next_recommended_agents=[],
             )
 
+        if not proposal["files"]:
+            # A real, valid outcome — not a failure. The model looked at the
+            # real files and genuinely found nothing to change (e.g. the
+            # version asked for is already met). Reporting this as a failed
+            # PR attempt would be misleading, since no change was ever
+            # written or attempted.
+            return AgentResult.llm(
+                result={
+                    "repo": repo,
+                    "status": "no_change_needed",
+                    "summary": proposal["summary"],
+                    "pr_opened": False,
+                    "pr_url": None,
+                    "files_not_read": read_errors,
+                },
+                schema=_NoChangeOutputSchema,
+                confidence=0.7,
+                assumptions=["Proposal is grounded only in the files actually supplied"],
+                sources=["validated LLM code proposal (real provider)", "GitHub Contents API"],
+                risks=proposal["risks"],
+                next_recommended_agents=[],
+            )
+
         branch = f"av-nexus/{proposal['branch_suffix']}-{uuid.uuid4().hex[:8]}"
         pr_outcome = ctx.run_tool(
             "github_propose_pr",
@@ -161,4 +184,13 @@ class _CodingOutputSchema(BaseModel):
     branch: str
     summary: str
     files_changed: list[str]
+    pr_opened: bool
+
+
+class _NoChangeOutputSchema(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    repo: str
+    status: str
+    summary: str
     pr_opened: bool

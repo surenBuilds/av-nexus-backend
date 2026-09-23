@@ -83,8 +83,13 @@ def format_coding_result(output_json: dict[str, Any] | None, error: str | None) 
     if status == "not_generated":
         reason = result.get("reason")
         if reason == "repo_required":
-            return "❌ repo նշված չէ։ Օգտագործում. /code <նկարագրություն>"
+            return "❌ repo նշված չէ։ Օգտագործում. /code ֆայլ1,ֆայլ2 | նկարագրություն"
         return "❌ LLM provider-ը կոնֆիգուրացված չէ (GROQ_API_KEY)։ Ոչինչ չի գրվել։"
+    if status == "no_change_needed":
+        return (
+            f"✅ Ստուգեցի իրական ֆայլ(եր)ը — փոփոխության կարիք չկար։\n"
+            f"Պատճառ. {result.get('summary', 'n/a')}"
+        )
     if result.get("pr_opened"):
         files = ", ".join(result.get("files_changed", [])) or "(ֆայլ չկա)"
         return (
