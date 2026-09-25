@@ -26,6 +26,7 @@ from av_nexus.integrations.telegram import (
     TelegramClient,
     format_agent_summary,
     format_coding_result,
+    format_review_result,
     translate_warning,
 )
 from av_nexus.integrations.voxline import VoxlineUnavailableError, run_agents_from_voxline
@@ -83,12 +84,13 @@ async def telegram_webhook(
         return JSONResponse({"ok": True})
 
     is_code_command = text.startswith("/code")
+    is_review_command = text == "/review"
     agent_ids: list[str] | None = None
     if text == "/brief":
         agent_ids = None  # all 5
     elif text in _SINGLE_AGENT_COMMANDS:
         agent_ids = [_SINGLE_AGENT_COMMANDS[text]]
-    elif not is_code_command:
+    elif not is_code_command and not is_review_command:
         telegram.send_message(chat_id, "Չճանաչված հրաման։\n\n" + HELP_TEXT)
         return JSONResponse({"ok": True})
 
@@ -141,6 +143,18 @@ async def telegram_webhook(
             telegram.send_message(chat_id, format_coding_result(task.output_json, task.error))
             return JSONResponse({"ok": True})
 
+        if is_review_command:
+            repo = (settings.github_allowed_repos or "").split(",")[0].strip()
+            if not repo:
+                telegram.send_message(
+                    chat_id, "❌ AVNEXUS_GITHUB_ALLOWED_REPOS-ը կոնֆիգուրացված չէ"
+                )
+                return JSONResponse({"ok": True})
+            telegram.send_message(chat_id, f"🔍 Սկսում եմ {repo}-ի վերլուծությունը, սպասիր...")
+            task = await _run_review_task(session, org, user, repo=repo)
+            telegram.send_message(chat_id, format_review_result(task.output_json, task.error))
+            return JSONResponse({"ok": True})
+
         try:
             result, outcomes = await run_agents_from_voxline(session, org, user, agent_ids)
         except VoxlineUnavailableError as exc:
@@ -180,6 +194,27 @@ async def _run_coding_task(
         capability="code_changes",
         approval_level=1,
         input_json={"repo": repo, "task": task_text, "context_files": context_files},
+    )
+    session.commit()
+    session.refresh(task)
+    await service.run_task(task, org, user)
+    session.refresh(task)
+    return task
+
+
+async def _run_review_task(session: Session, org: Organization, user: User, *, repo: str) -> Task:
+    """Create and run one read-only Coding Agent review task (no PR)."""
+    from av_nexus.agents import get_registry
+
+    service = OrchestratorService(session, get_registry(), build_llm_client())
+    task = service.create_task(
+        org,
+        user,
+        title=f"Telegram /review — {repo}",
+        goal=f"Review the {repo} codebase and suggest additions",
+        capability="code_changes",
+        approval_level=1,
+        input_json={"repo": repo, "mode": "review"},
     )
     session.commit()
     session.refresh(task)

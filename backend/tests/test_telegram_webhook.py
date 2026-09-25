@@ -10,17 +10,35 @@ Telegram send, never the agent logic itself.
 
 from __future__ import annotations
 
+import base64
+import json as _json
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
 from av_nexus.config import settings
+from av_nexus.llm.base import LLMResult
 from tests.conftest import register_and_login
 from tests.test_voxline_integration import REAL_BRIEF
 
 API = "/api/v1"
 WEBHOOK = f"{API}/integrations/telegram/webhook"
 SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
+
+
+class _FakeLLM:
+    """Real-provider stand-in: returns a fixed JSON payload, optionally
+    wrapped in a markdown code fence the way real providers often do."""
+
+    def __init__(self, payload: dict | None = None, fenced: bool = False) -> None:
+        self._payload = payload
+        self._fenced = fenced
+
+    def complete(self, system: str, user: str) -> LLMResult:
+        text = _json.dumps(self._payload)
+        if self._fenced:
+            text = f"```json\n{text}\n```"
+        return LLMResult(content=text, provider="fake")
 
 
 def _telegram_settings(*, chat_id: str = "12345", email: str = "chair@example.com") -> None:
@@ -157,18 +175,12 @@ def test_webhook_code_command_runs_coding_agent_and_opens_pr(client: TestClient)
         "files": [{"path": "README.md", "content": "fixed", "message": "fix"}],
         "risks": [],
     }
-    import json as _json
-
-    class _FakeLLM:
-        def complete(self, system: str, user: str):  # noqa: ANN001, ANN201
-            from av_nexus.llm.base import LLMResult
-
-            return LLMResult(content=f"```json\n{_json.dumps(proposal)}\n```", provider="fake")
+    llm = _FakeLLM(payload=proposal, fenced=True)
 
     read_resp = MagicMock(status_code=200)
     read_resp.json.return_value = {
         "encoding": "base64",
-        "content": __import__("base64").b64encode(b"a typo here").decode(),
+        "content": base64.b64encode(b"a typo here").decode(),
         "sha": "readsha",
     }
     ref_resp = MagicMock(status_code=200)
@@ -180,7 +192,7 @@ def test_webhook_code_command_runs_coding_agent_and_opens_pr(client: TestClient)
     pr_resp.json.return_value = {"html_url": "https://github.com/x/y/pull/9", "number": 9}
 
     with (
-        patch("av_nexus.api.telegram.build_llm_client", return_value=_FakeLLM()),
+        patch("av_nexus.api.telegram.build_llm_client", return_value=llm),
         patch("av_nexus.tools.registry.settings.github_token", "tok"),
         patch("httpx.get", side_effect=[read_resp, ref_resp, existing_resp]),
         patch("httpx.post", side_effect=[branch_resp, pr_resp]),
@@ -228,6 +240,54 @@ def test_webhook_code_command_without_file_list_asks_for_files_instead_of_guessi
     assert resp.status_code == 200
     sent_text = mock_send.call_args.args[1]
     assert "Օգտագործում" in sent_text
+
+
+def test_webhook_review_command_runs_read_only_review(client: TestClient) -> None:
+    register_and_login(client)
+    _telegram_settings()
+
+    review = {
+        "summary": "Solid Vite + React setup.",
+        "strengths": ["TypeScript"],
+        "gaps": ["Only a sample of files reviewed"],
+        "suggested_additions": [
+            {"area": "testing", "suggestion": "Add tests", "rationale": "None found"}
+        ],
+    }
+    llm = _FakeLLM(payload=review)
+
+    list_resp = MagicMock(status_code=200)
+    list_resp.json.return_value = {
+        "truncated": False,
+        "tree": [{"path": "package.json", "type": "blob"}],
+    }
+    read_resp = MagicMock(status_code=200)
+    read_resp.json.return_value = {
+        "encoding": "base64",
+        "content": base64.b64encode(b"{}").decode(),
+        "sha": "sha",
+    }
+
+    with (
+        patch("av_nexus.api.telegram.build_llm_client", return_value=llm),
+        patch("av_nexus.tools.registry.settings.github_token", "tok"),
+        patch("httpx.get", side_effect=[list_resp, read_resp]),
+        patch("httpx.post") as mock_post,
+        patch("httpx.put") as mock_put,
+        patch("av_nexus.api.telegram.TelegramClient.send_message") as mock_send,
+    ):
+        resp = client.post(
+            WEBHOOK, json=_update("/review"), headers={SECRET_HEADER: "test-webhook-secret"}
+        )
+
+    assert resp.status_code == 200
+    mock_post.assert_not_called()
+    mock_put.assert_not_called()
+    # Two sends: the "starting" notice, then the actual review.
+    assert mock_send.call_count == 2
+    final_text = mock_send.call_args_list[-1].args[1]
+    assert "Add tests" in final_text
+    assert "1/1" in final_text
 
 
 def test_send_message_logs_instead_of_silently_swallowing_telegram_rejection(capsys) -> None:

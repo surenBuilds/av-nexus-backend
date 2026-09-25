@@ -39,6 +39,35 @@ class CodeChangeSchema(BaseModel):
     risks: list[str]
 
 
+class SuggestedAddition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    area: str
+    suggestion: str
+    rationale: str
+
+
+class CodebaseReviewSchema(BaseModel):
+    """Real model provider output a codebase review must validate against."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    strengths: list[str]
+    gaps: list[str]
+    suggested_additions: list[SuggestedAddition]
+
+
+# Review mode reads real file content to stay grounded, but must fit in one
+# LLM call — these caps bound how much of a real, possibly large repo gets
+# pulled in, prioritizing likely-source files over assets/lockfiles.
+_REVIEW_MAX_FILES = 15
+_REVIEW_MAX_CHARS_PER_FILE = 4000
+_REVIEW_SOURCE_EXTENSIONS = (
+    ".ts", ".tsx", ".js", ".jsx", ".py", ".json", ".md", ".yml", ".yaml", ".css",
+)  # fmt: skip
+
+
 class CodingAgent(BaseAgent):
     agent_id = "coding"
     name = "Coding Agent"
@@ -46,20 +75,15 @@ class CodingAgent(BaseAgent):
     description = (
         "Reads real files from an allowlisted GitHub repo, drafts a code change with a "
         "real model provider, and opens it as a branch + PR. Never pushes to the base "
-        "branch — every change is a PR a human reviews and merges."
+        "branch — every change is a PR a human reviews and merges. Can also produce a "
+        "read-only codebase review (mode='review') with no PR attempted."
     )
     capabilities = ["code_changes"]
-    tools = ["github_read_file", "github_propose_pr"]
+    tools = ["github_read_file", "github_propose_pr", "github_list_files"]
     permissions = ["code_write", "research"]
 
     async def run(self, ctx: AgentContext, goal: str) -> AgentResult:
         repo = str(ctx.inputs.get("repo", "")).strip()
-        task = str(ctx.inputs.get("task", "")).strip() or goal
-        base = str(ctx.inputs.get("base", "main")).strip() or "main"
-        context_paths = ctx.inputs.get("context_files") or []
-        if not isinstance(context_paths, list):
-            context_paths = []
-
         if not repo:
             return AgentResult.deterministic(
                 result={"status": "not_generated", "reason": "repo_required"},
@@ -69,6 +93,103 @@ class CodingAgent(BaseAgent):
                 risks=["No repo was supplied — nothing was read or proposed"],
                 next_recommended_agents=[],
             )
+
+        if str(ctx.inputs.get("mode", "")).strip() == "review":
+            return await self._run_review(ctx, repo)
+        return await self._run_change(ctx, repo, goal)
+
+    async def _run_review(self, ctx: AgentContext, repo: str) -> AgentResult:
+        list_outcome = ctx.run_tool("github_list_files", {"repo": repo})
+        list_result = list_outcome.get("result") or {}
+        if not (list_outcome.get("ok") and list_result.get("ok")):
+            error = list_result.get("error") or list_outcome.get("error") or "unknown error"
+            return AgentResult.deterministic(
+                result={"status": "not_generated", "reason": "list_files_failed", "error": error},
+                confidence=0.1,
+                assumptions=[],
+                sources=[],
+                risks=[f"Could not list files in {repo}: {error}"],
+                next_recommended_agents=[],
+            )
+
+        all_files: list[str] = list_result.get("files", [])
+        candidates = [f for f in all_files if f.endswith(_REVIEW_SOURCE_EXTENSIONS)]
+        selected = candidates[:_REVIEW_MAX_FILES]
+
+        read_files: dict[str, str] = {}
+        read_errors: list[str] = []
+        for path in selected:
+            outcome = ctx.run_tool("github_read_file", {"repo": repo, "path": path})
+            result = outcome.get("result") or {}
+            if outcome.get("ok") and result.get("ok"):
+                content = result.get("content", "")
+                read_files[path] = content[:_REVIEW_MAX_CHARS_PER_FILE]
+            else:
+                read_errors.append(
+                    f"{path}: {result.get('error') or outcome.get('error') or 'unknown error'}"
+                )
+
+        system_prompt = (
+            "You are a senior software engineer reviewing a real codebase. Base your review "
+            "ONLY on the real file listing and real file contents supplied below — never "
+            "invent files, features, or code you were not shown. This is a partial view "
+            "(a capped sample of files, not the whole repo), so be explicit in `gaps` about "
+            "what you could not see rather than assuming the rest of the codebase matches "
+            "what you did see. "
+            "Respond ONLY with a JSON object exactly matching this schema: "
+            + json.dumps(CodebaseReviewSchema.model_json_schema())
+        )
+        user_prompt = json.dumps(
+            {
+                "repo": repo,
+                "total_files_in_repo": len(all_files),
+                "files_reviewed": list(read_files.keys()),
+                "files_reviewed_count_vs_total": f"{len(read_files)}/{len(all_files)}",
+                "file_contents": read_files,
+                "files_that_could_not_be_read": read_errors,
+            },
+            default=str,
+        )
+
+        review = self._structured_llm(ctx, system_prompt, user_prompt, CodebaseReviewSchema)
+        if review is None:
+            return AgentResult.deterministic(
+                result={"status": "not_generated", "reason": "no_llm_provider", "repo": repo},
+                confidence=0.2,
+                assumptions=["Review requires a real model provider (e.g. Groq)"],
+                sources=["none available"],
+                risks=["No review was produced"],
+                next_recommended_agents=[],
+            )
+
+        return AgentResult.llm(
+            result={
+                "repo": repo,
+                "status": "review_complete",
+                "files_reviewed": list(read_files.keys()),
+                "files_reviewed_count": len(read_files),
+                "total_files_in_repo": len(all_files),
+                "summary": review["summary"],
+                "strengths": review["strengths"],
+                "gaps": review["gaps"],
+                "suggested_additions": review["suggested_additions"],
+            },
+            schema=_ReviewOutputSchema,
+            confidence=0.6,
+            assumptions=[f"Review is grounded only in the {len(read_files)} files actually read"],
+            sources=["validated LLM review (real provider)", "GitHub Contents/Trees API"],
+            risks=[
+                f"Only {len(read_files)} of {len(all_files)} real files in the repo were reviewed"
+            ],
+            next_recommended_agents=["coding"],
+        )
+
+    async def _run_change(self, ctx: AgentContext, repo: str, goal: str) -> AgentResult:
+        task = str(ctx.inputs.get("task", "")).strip() or goal
+        base = str(ctx.inputs.get("base", "main")).strip() or "main"
+        context_paths = ctx.inputs.get("context_files") or []
+        if not isinstance(context_paths, list):
+            context_paths = []
 
         read_files: dict[str, str] = {}
         read_errors: list[str] = []
@@ -194,3 +315,13 @@ class _NoChangeOutputSchema(BaseModel):
     status: str
     summary: str
     pr_opened: bool
+
+
+class _ReviewOutputSchema(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    repo: str
+    status: str
+    files_reviewed_count: int
+    total_files_in_repo: int
+    summary: str

@@ -47,7 +47,8 @@ HELP_TEXT = (
     "իրական Voxline տվյալով\n"
     "/ceo, /finance, /marketing, /operations, /sales — միայն այդ ուղղությունը\n"
     "/code ֆայլ1,ֆայլ2 | նկարագրություն — Coding Agent-ը կարդում է նշված\n"
-    "ֆայլ(եր)ը, առաջարկում է իրական փոփոխություն որպես PR (երբեք ուղիղ push main-ին)"
+    "ֆայլ(եր)ը, առաջարկում է իրական փոփոխություն որպես PR (երբեք ուղիղ push main-ին)\n"
+    "/review — վերլուծում է repo-ի մի քանի իրական ֆայլ, առաջարկում է ավելացումներ (առանց PR-ի)"
 )
 
 # Known, fixed warning strings from av_nexus.integrations.voxline translated
@@ -100,6 +101,38 @@ def format_coding_result(output_json: dict[str, Any] | None, error: str | None) 
     return (
         f"⚠️ Կոդը գրվեց, բայց PR-ը չբացվեց. {result.get('pr_error', 'unknown error')}\n"
         f"Branch. {result.get('branch', 'n/a')}"
+    )
+
+
+def format_review_result(output_json: dict[str, Any] | None, error: str | None) -> str:
+    if error:
+        return f"❌ Վերլուծությունը failed. {error}"
+    result = (output_json or {}).get("result", {}) if output_json else {}
+    status = result.get("status")
+    if status == "not_generated":
+        reason = result.get("reason")
+        if reason == "list_files_failed":
+            return f"❌ Չկարողացա ստանալ ֆայլերի ցուցակը. {result.get('error', 'n/a')}"
+        return "❌ LLM provider-ը կոնֆիգուրացված չէ (GROQ_API_KEY)։ Վերլուծություն չեղավ։"
+
+    reviewed = result.get("files_reviewed_count", 0)
+    total = result.get("total_files_in_repo", 0)
+    strengths = "\n".join(f"  ✓ {s}" for s in result.get("strengths", [])) or "  (չկա)"
+    gaps = "\n".join(f"  • {g}" for g in result.get("gaps", [])) or "  (չկա)"
+    additions = result.get("suggested_additions", [])
+    additions_lines = [
+        f"  {i + 1}. {a.get('suggestion')} — {a.get('rationale')}" for i, a in enumerate(additions)
+    ]
+    additions_text = "\n".join(additions_lines) or "  (չկա)"
+    return (
+        f"📋 Վերլուծություն ({reviewed}/{total} ֆայլ իրապես կարդացվեց)\n\n"
+        f"{result.get('summary', 'n/a')}\n\n"
+        f"Ուժեղ կողմեր.\n{strengths}\n\n"
+        f"Բացեր.\n{gaps}\n\n"
+        f"Առաջարկվող ավելացումներ.\n{additions_text}\n\n"
+        f"Հ.Գ. սա միայն {reviewed} ֆայլի հիման վրա է, ոչ թե ամբողջ repo-ի "
+        f"(GitHub API-ի token/context սահմանափակումներ)։ Կոնկրետ PR ուզածիս համար "
+        f"օգտագործիր /code։"
     )
 
 

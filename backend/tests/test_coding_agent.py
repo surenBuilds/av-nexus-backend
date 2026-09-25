@@ -161,6 +161,41 @@ def test_github_propose_pr_rejects_repo_outside_allowlist() -> None:
         )
 
 
+def test_github_list_files_filters_noise_and_reports_real_count() -> None:
+    settings.github_token = "tok"
+    settings.github_allowed_repos = "surenBuilds/Krtlab-appp"
+    from av_nexus.tools.registry import _tool_github_list_files
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "truncated": False,
+        "tree": [
+            {"path": "src/App.tsx", "type": "blob"},
+            {"path": "node_modules/foo/index.js", "type": "blob"},
+            {"path": "src/components", "type": "tree"},
+            {"path": "package.json", "type": "blob"},
+        ],
+    }
+    with patch("httpx.get", return_value=mock_response):
+        result = _tool_github_list_files(
+            _tool_ctx(), _tool_def("github_list_files"), {"repo": "surenBuilds/Krtlab-appp"}
+        )
+    assert result["ok"] is True
+    assert result["files"] == ["src/App.tsx", "package.json"]
+
+
+def test_github_list_files_rejects_repo_outside_allowlist() -> None:
+    settings.github_token = "tok"
+    settings.github_allowed_repos = "surenBuilds/Krtlab-appp"
+    from av_nexus.tools.registry import _tool_github_list_files
+
+    with pytest.raises(ToolPermissionError):
+        _tool_github_list_files(
+            _tool_ctx(), _tool_def("github_list_files"), {"repo": "someone/else"}
+        )
+
+
 # -------------------------------------------------------------- agent tests #
 
 
@@ -286,3 +321,85 @@ def test_coding_agent_full_flow_opens_real_pr_from_real_llm_proposal(db_session)
     assert result.result["pr_url"] == "https://github.com/surenBuilds/Krtlab-appp/pull/7"
     assert result.result["files_changed"] == ["README.md"]
     assert result.result["branch"].startswith("av-nexus/fix-typo-")
+
+
+def test_coding_agent_review_mode_reads_real_files_and_never_opens_a_pr(db_session) -> None:
+    settings.github_token = "tok"
+    settings.github_allowed_repos = "surenBuilds/Krtlab-appp"
+
+    review = {
+        "summary": "A React + Vite app with a clear component structure.",
+        "strengths": ["Uses TypeScript throughout"],
+        "gaps": ["Only a sample of files was reviewed, not the full repo"],
+        "suggested_additions": [
+            {
+                "area": "testing",
+                "suggestion": "Add a test suite",
+                "rationale": "No test files were found among the files reviewed",
+            }
+        ],
+    }
+    import json as _json
+
+    llm = FakeLLM(lambda _user: _json.dumps(review))
+
+    org_id = uuid.uuid4()
+    tools = build_tool_registry(db_session, org_id, CodingAgent().permissions)
+    ctx = AgentContext(
+        org_id=org_id,
+        llm=llm,
+        inputs={"repo": "surenBuilds/Krtlab-appp", "mode": "review"},
+        tools=tools,
+    )
+
+    list_resp = MagicMock(status_code=200)
+    list_resp.json.return_value = {
+        "truncated": False,
+        "tree": [
+            {"path": "src/App.tsx", "type": "blob"},
+            {"path": "package.json", "type": "blob"},
+            {"path": "assets/logo.png", "type": "blob"},
+        ],
+    }
+    read_resp = MagicMock(status_code=200)
+    read_resp.json.return_value = {
+        "encoding": "base64",
+        "content": base64.b64encode(b"export default function App() {}").decode(),
+        "sha": "sha",
+    }
+
+    with (
+        patch("httpx.get", side_effect=[list_resp, read_resp, read_resp]) as mock_get,
+        patch("httpx.post") as mock_post,
+        patch("httpx.put") as mock_put,
+    ):
+        result = asyncio.run(CodingAgent().run(ctx, "review the codebase"))
+
+    assert result.mode == "llm"
+    assert result.result["status"] == "review_complete"
+    assert result.result["files_reviewed_count"] == 2  # asset filtered out by extension
+    assert result.result["total_files_in_repo"] == 3
+    assert result.result["suggested_additions"][0]["area"] == "testing"
+    # Read-only: exactly one list call + one read call per source file, no writes at all.
+    assert mock_get.call_count == 3
+    mock_post.assert_not_called()
+    mock_put.assert_not_called()
+
+
+def test_coding_agent_review_mode_without_llm_provider_is_honest(db_session) -> None:
+    settings.github_token = "tok"
+    settings.github_allowed_repos = "surenBuilds/Krtlab-appp"
+
+    org_id = uuid.uuid4()
+    tools = build_tool_registry(db_session, org_id, CodingAgent().permissions)
+    ctx = AgentContext(
+        org_id=org_id,
+        inputs={"repo": "surenBuilds/Krtlab-appp", "mode": "review"},
+        tools=tools,
+    )
+    list_resp = MagicMock(status_code=200)
+    list_resp.json.return_value = {"truncated": False, "tree": []}
+    with patch("httpx.get", return_value=list_resp):
+        result = asyncio.run(CodingAgent().run(ctx, "review"))
+    assert result.mode == "deterministic"
+    assert result.result["reason"] == "no_llm_provider"

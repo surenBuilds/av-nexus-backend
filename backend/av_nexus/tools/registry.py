@@ -342,6 +342,50 @@ def _github_repo_allowed(repo: str) -> bool:
     return repo in allowed
 
 
+def _tool_github_list_files(
+    ctx: ToolContext, tool: ToolDef, args: dict[str, Any]
+) -> dict[str, Any]:
+    """List real file paths in an allowlisted repo via the Git Trees API.
+    Filters out common noise directories so callers aren't flooded with
+    node_modules/build output — never invents paths that aren't returned."""
+    import httpx
+
+    repo = str(args.get("repo", ""))
+    ref = str(args.get("ref", "") or "HEAD")
+    if not settings.github_token:
+        return {"ok": False, "error": "AVNEXUS_GITHUB_TOKEN is not configured"}
+    if not _github_repo_allowed(repo):
+        raise ToolPermissionError(f"repo '{repo}' is not in AVNEXUS_GITHUB_ALLOWED_REPOS")
+
+    noise_prefixes = (
+        "node_modules/",
+        "dist/",
+        "build/",
+        ".git/",
+        "coverage/",
+        ".next/",
+        "package-lock.json",
+    )
+    url = f"https://api.github.com/repos/{repo}/git/trees/{ref}"
+    try:
+        resp = httpx.get(url, headers=_github_headers(), params={"recursive": "1"}, timeout=15.0)
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"network error: {exc}"}
+    if resp.status_code != 200:
+        return {"ok": False, "error": f"GitHub returned {resp.status_code}: {resp.text[:300]}"}
+    data = resp.json()
+    if data.get("truncated"):
+        note = "GitHub truncated this listing (very large repo) — not every file is included"
+    else:
+        note = f"{len(data.get('tree', []))} real entries returned"
+    files = [
+        item["path"]
+        for item in data.get("tree", [])
+        if item.get("type") == "blob" and not str(item["path"]).startswith(noise_prefixes)
+    ]
+    return {"ok": True, "files": files, "note": note}
+
+
 def _tool_github_read_file(
     ctx: ToolContext, tool: ToolDef, args: dict[str, Any]
 ) -> dict[str, Any]:
@@ -485,6 +529,7 @@ _CALLS = {
     "research_web": _tool_research_web,
     "github_read_file": _tool_github_read_file,
     "github_propose_pr": _tool_github_propose_pr,
+    "github_list_files": _tool_github_list_files,
 }
 
 
@@ -531,6 +576,12 @@ def default_tools() -> list[ToolDef]:
             "Read one real file's content from an allowlisted GitHub repo",
             "code_write",
             {"repo": "string", "path": "string", "ref": "string|optional"},
+        ),
+        ToolDef(
+            "github_list_files",
+            "List real file paths in an allowlisted GitHub repo (noise dirs filtered)",
+            "code_write",
+            {"repo": "string", "ref": "string|optional"},
         ),
         ToolDef(
             "github_propose_pr",
