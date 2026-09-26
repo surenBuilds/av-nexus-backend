@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_timeout_seconds: int = 60
+    # Explicit cap so a verbose JSON response (e.g. one that echoes a full
+    # file's content back) can't get cut off mid-string by an unset/small
+    # provider default — an unterminated JSON string is a parse failure, not
+    # a retryable one, so this directly prevents a real failure mode.
+    llm_max_tokens: int = 4096
 
     # Workflow execution
     workflow_poll_seconds: float = 0.25

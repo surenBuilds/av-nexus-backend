@@ -91,3 +91,19 @@ def test_openai_client_still_labels_real_openai_as_openai() -> None:
         result = client.complete("system", "user")
 
     assert result.provider == "openai"
+
+
+def test_openai_client_always_sends_an_explicit_max_tokens() -> None:
+    # Regression test: an unset max_tokens let a real provider (Groq) cut a
+    # verbose JSON response off mid-string, which then failed to parse —
+    # not a transport error, a silent truncation. This asserts the request
+    # body always carries a real, non-zero cap.
+    client = OpenAIClient(api_key="k", base_url="https://api.groq.com/openai/v1", model="m")
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+    with patch("httpx.Client.post", return_value=mock_response) as mock_post:
+        client.complete("system", "user")
+    sent_body = mock_post.call_args.kwargs["json"]
+    assert sent_body["max_tokens"] == settings.llm_max_tokens
+    assert sent_body["max_tokens"] > 0

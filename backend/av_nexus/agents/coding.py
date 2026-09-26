@@ -59,13 +59,20 @@ class CodebaseReviewSchema(BaseModel):
 
 
 # Review mode reads real file content to stay grounded, but must fit in one
-# LLM call — these caps bound how much of a real, possibly large repo gets
-# pulled in, prioritizing likely-source files over assets/lockfiles.
-_REVIEW_MAX_FILES = 15
-_REVIEW_MAX_CHARS_PER_FILE = 4000
+# LLM call — Groq's free tier enforces an 8000 TPM per-request ceiling, so
+# these caps are deliberately conservative (a handful of small excerpts,
+# not a dozen full files) rather than tuned for quality alone.
+_REVIEW_MAX_FILES = 6
+_REVIEW_MAX_CHARS_PER_FILE = 1500
 _REVIEW_SOURCE_EXTENSIONS = (
     ".ts", ".tsx", ".js", ".jsx", ".py", ".json", ".md", ".yml", ".yaml", ".css",
 )  # fmt: skip
+
+# Change-mode files are capped the same way — a single real file can easily
+# exceed Groq's 8000 TPM per-request ceiling on its own. Truncation is
+# reported honestly in `files_truncated` rather than silently sending a
+# partial file and letting the model guess at what it wasn't shown.
+_CHANGE_MAX_CHARS_PER_FILE = 6000
 
 
 class CodingAgent(BaseAgent):
@@ -193,11 +200,16 @@ class CodingAgent(BaseAgent):
 
         read_files: dict[str, str] = {}
         read_errors: list[str] = []
+        truncated_files: list[str] = []
         for path in context_paths:
             outcome = ctx.run_tool("github_read_file", {"repo": repo, "path": str(path)})
             result = outcome.get("result") or {}
             if outcome.get("ok") and result.get("ok"):
-                read_files[str(path)] = result.get("content", "")
+                content = result.get("content", "")
+                if len(content) > _CHANGE_MAX_CHARS_PER_FILE:
+                    truncated_files.append(str(path))
+                    content = content[:_CHANGE_MAX_CHARS_PER_FILE]
+                read_files[str(path)] = content
             else:
                 read_errors.append(
                     f"{path}: {result.get('error') or outcome.get('error') or 'unknown error'}"
@@ -206,8 +218,10 @@ class CodingAgent(BaseAgent):
         system_prompt = (
             "You are a careful senior software engineer proposing a code change. "
             "Base every file edit ONLY on the real file contents supplied below — never "
-            "invent files or assume content you were not given. If you need to see a file "
-            "that was not supplied, say so in `risks` instead of guessing its content. "
+            "invent files or assume content you were not given. Some files may be truncated "
+            "(see `files_truncated`) because they were too large to send in full — if a "
+            "truncated file is the one you need to edit in full, say so in `risks` instead of "
+            "guessing at content you were not shown. "
             "Respond ONLY with a JSON object exactly matching this schema: "
             + json.dumps(CodeChangeSchema.model_json_schema())
         )
@@ -216,6 +230,7 @@ class CodingAgent(BaseAgent):
                 "repo": repo,
                 "task": task,
                 "existing_files": read_files,
+                "files_truncated": truncated_files,
                 "files_that_could_not_be_read": read_errors,
             },
             default=str,
@@ -237,6 +252,12 @@ class CodingAgent(BaseAgent):
                 next_recommended_agents=[],
             )
 
+        truncation_risks = (
+            [f"Truncated before sending to the model: {', '.join(truncated_files)}"]
+            if truncated_files
+            else []
+        )
+
         if not proposal["files"]:
             # A real, valid outcome — not a failure. The model looked at the
             # real files and genuinely found nothing to change (e.g. the
@@ -256,7 +277,7 @@ class CodingAgent(BaseAgent):
                 confidence=0.7,
                 assumptions=["Proposal is grounded only in the files actually supplied"],
                 sources=["validated LLM code proposal (real provider)", "GitHub Contents API"],
-                risks=proposal["risks"],
+                risks=proposal["risks"] + truncation_risks,
                 next_recommended_agents=[],
             )
 
@@ -293,7 +314,11 @@ class CodingAgent(BaseAgent):
             confidence=0.75 if pr_ok else 0.5,
             assumptions=["Proposal is grounded only in the files actually supplied"],
             sources=["validated LLM code proposal (real provider)", "GitHub Contents API"],
-            risks=proposal["risks"] + ([] if pr_ok else ["PR creation failed — see pr_error"]),
+            risks=(
+                proposal["risks"]
+                + truncation_risks
+                + ([] if pr_ok else ["PR creation failed — see pr_error"])
+            ),
             next_recommended_agents=["critic"],
         )
 

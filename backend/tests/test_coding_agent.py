@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -271,6 +272,62 @@ def test_coding_agent_with_no_files_to_change_reports_no_change_not_a_failure(db
     assert mock_get.call_count == 1
     mock_post.assert_not_called()
     mock_put.assert_not_called()
+
+
+def test_coding_agent_truncates_large_context_file_before_sending_to_llm(db_session) -> None:
+    """Regression test: a real file (e.g. useUserProfile.tsx) can exceed
+    Groq's free-tier per-request token ceiling on its own. This asserts the
+    content actually sent to the model is capped, and the cap is reported
+    honestly to the caller — not silently sent in full or silently sent
+    truncated with no trace."""
+    settings.github_token = "tok"
+    settings.github_allowed_repos = "surenBuilds/Krtlab-appp"
+
+    proposal = {
+        "branch_suffix": "noop",
+        "title": "n/a",
+        "body": "n/a",
+        "summary": "n/a",
+        "files": [],
+        "risks": [],
+    }
+    captured_user_prompts: list[str] = []
+
+    class _CapturingLLM:
+        def complete(self, system: str, user: str) -> LLMResult:
+            captured_user_prompts.append(user)
+            return LLMResult(content=json.dumps(proposal), provider="fake_provider")
+
+    huge_content = "x" * 50_000  # far larger than _CHANGE_MAX_CHARS_PER_FILE
+    read_resp = MagicMock(status_code=200)
+    read_resp.json.return_value = {
+        "encoding": "base64",
+        "content": base64.b64encode(huge_content.encode()).decode(),
+        "sha": "sha",
+    }
+
+    org_id = uuid.uuid4()
+    tools = build_tool_registry(db_session, org_id, CodingAgent().permissions)
+    ctx = AgentContext(
+        org_id=org_id,
+        llm=_CapturingLLM(),
+        inputs={
+            "repo": "surenBuilds/Krtlab-appp",
+            "task": "inspect only",
+            "context_files": ["src/hooks/useUserProfile.tsx"],
+        },
+        tools=tools,
+    )
+
+    with patch("httpx.get", return_value=read_resp):
+        result = asyncio.run(CodingAgent().run(ctx, "inspect"))
+
+    assert len(captured_user_prompts) == 1
+    sent = json.loads(captured_user_prompts[0])
+    sent_content = sent["existing_files"]["src/hooks/useUserProfile.tsx"]
+    assert len(sent_content) <= 6000  # _CHANGE_MAX_CHARS_PER_FILE
+    assert sent["files_truncated"] == ["src/hooks/useUserProfile.tsx"]
+    assert any("Truncated" in r for r in result.risks)
 
 
 def test_coding_agent_full_flow_opens_real_pr_from_real_llm_proposal(db_session) -> None:

@@ -53,6 +53,7 @@ class OpenAIClient:
                 {"role": "user", "content": user},
             ],
             "temperature": 0.3,
+            "max_tokens": settings.llm_max_tokens,
         }
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(url, headers={"Authorization": f"Bearer {self.api_key}"}, json=body)
